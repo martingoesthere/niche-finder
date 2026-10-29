@@ -18,6 +18,10 @@ const TITLE_STOP_WORDS = new Set([
   "after", "before", "here", "these", "those", "they", "their", "them", "be", "not", "so", "if", "all",
   "just", "only", "really", "should", "need", "use", "using", "video", "full", "guide", "explained",
   "shorts", "part", "ever", "every", "more", "most", "much", "out", "up", "at", "by", "as", "who",
+  // filler words found in real titles during testing ("getting", "over", "people", "actually")
+  "getting", "over", "people", "actually", "keep", "keeping", "thing", "stop", "doing", "now", "worth",
+  "make", "made", "way", "still", "even", "without", "into", "off", "than", "then", "go", "going",
+  "know", "want", "like", "look", "see", "watch", "time", "day", "year", "month", "said", "say",
 ]);
 
 // ---------- Shapes ----------
