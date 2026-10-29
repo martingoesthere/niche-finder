@@ -9,6 +9,7 @@
     "fetch-test": "tsx src/scripts/fetchTest.ts",
     "niche-test": "tsx src/scripts/nicheTest.ts",
     "score-test": "tsx src/scripts/scoreTest.ts",
+    "topic-test": "tsx src/scripts/topicTest.ts",
     "build": "tsc",
     "start": "node dist/server.js"
   },
