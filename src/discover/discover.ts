@@ -1,138 +1,166 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { collectNiche, DEFAULT_MAX_PAGES, NotCachedError } from "../niche/collectNiche.js";
+import { collectNiche, NotCachedError, type CollectOptions } from "../niche/collectNiche.js";
 import { scoreNiche, type Confidence } from "../niche/scoreNiche.js";
 import { findTopics } from "../topics/findTopics.js";
-import { SEED_NICHES, type SeedGroup } from "./seedNiches.js";
+import { NICHE_TREE, PAGES_BY_LEVEL, type NicheGroup, type NicheLevel, type TreeNode } from "./nicheTree.js";
 
-// Most units one new niche can use: each page = 1 search (100) + video stats (1) + channel stats (1)
-export const MAX_UNITS_PER_NICHE = DEFAULT_MAX_PAGES * 102;
-
-// Default budget per run, leaving plenty of your 10,000 daily units for normal searches
+// Default budget for "npm run discover", leaving room for normal searches in your 10,000 daily units
 export const DEFAULT_BUDGET = 4_500;
 
-// Discovery reuses saved YouTube data for 7 days, so several runs build the full list
-const DISCOVERY_CACHE_HOURS = 24 * 7;
+// The tree reuses saved YouTube data for 7 days, so checks you made earlier stay free
+const TREE_CACHE_HOURS = 24 * 7;
 
-const DATA_DIR = path.resolve("data");
-const LATEST_FILE = path.join(DATA_DIR, "discovery-latest.json");
+// Most units one node can use: each page = 1 search (100) + video stats (1) + channel stats (1)
+export function maxUnitsFor(level: NicheLevel): number {
+  return PAGES_BY_LEVEL[level] * 102;
+}
 
-export type DiscoveryRow = {
+// Same options everywhere, so the page and the scripts share one saved copy per node
+export function collectOptionsFor(node: TreeNode): CollectOptions {
+  return { language: "en", region: "US", maxPages: PAGES_BY_LEVEL[node.level], maxAgeHours: TREE_CACHE_HOURS };
+}
+
+export type NodeRow = {
+  id: string;
   query: string;
-  group: SeedGroup;
-  checkedAt: string; // when the YouTube data was collected
-  confidence: Confidence;
+  level: NicheLevel;
+  group: NicheGroup;
+  childCount: number;
+  checked: boolean; // false = no saved data yet
+  checkedAt: string | null;
+  confidence: Confidence | null;
   sampleSize: number;
   demand: number | null;
   competition: number | null;
   opportunity: number | null;
   freshness: number | null;
-  fit: number | null; // simple average, see fitScore()
+  fit: number | null;
+  medianViews: number | null;
   bestOutlier: { title: string; url: string; views: number; subscribers: number | null; ratio: number } | null;
-  topTopic: string | null;
-};
-
-export type DiscoveryReport = {
-  ranAt: string;
-  unitsUsed: number;
-  checked: number;
-  notCheckedYet: string[]; // skipped this run to protect your quota
-  rows: DiscoveryRow[]; // best first
+  topTopics: string[];
 };
 
 /**
- * One easy-to-read number for ranking niches.
+ * One easy-to-read number for ranking.
  * Equal-weight average of Demand, Opportunity, Freshness and (100 - Competition).
- * It's a sorting aid, not a prediction. Needs all four scores, otherwise null.
+ * A sorting aid, not a prediction. Needs all four scores, otherwise null.
  */
-export function fitScore(r: Pick<DiscoveryRow, "demand" | "competition" | "opportunity" | "freshness">): number | null {
+export function fitScore(r: Pick<NodeRow, "demand" | "competition" | "opportunity" | "freshness">): number | null {
   if (r.demand === null || r.competition === null || r.opportunity === null || r.freshness === null) return null;
   return Math.round((r.demand + (100 - r.competition) + r.opportunity + r.freshness) / 4);
 }
 
-export async function runDiscovery(budget = DEFAULT_BUDGET, log: (line: string) => void = () => {}): Promise<DiscoveryReport> {
-  const rows: DiscoveryRow[] = [];
-  const notCheckedYet: string[] = [];
+function emptyRow(node: TreeNode): NodeRow {
+  return {
+    id: node.id, query: node.query, level: node.level, group: node.group, childCount: node.children.length,
+    checked: false, checkedAt: null, confidence: null, sampleSize: 0,
+    demand: null, competition: null, opportunity: null, freshness: null, fit: null,
+    medianViews: null, bestOutlier: null, topTopics: [],
+  };
+}
+
+async function rowFor(node: TreeNode, cacheOnly: boolean): Promise<{ row: NodeRow; unitsUsed: number }> {
+  let result;
+  try {
+    result = await collectNiche(node.query, { ...collectOptionsFor(node), cacheOnly });
+  } catch (err: unknown) {
+    if (err instanceof NotCachedError) return { row: emptyRow(node), unitsUsed: 0 };
+    throw err;
+  }
+
+  const scores = scoreNiche(result.exactVideos, result.channels);
+  const topics = findTopics(result);
+  const best = topics.outliers[0];
+
+  const row: NodeRow = {
+    ...emptyRow(node),
+    checked: true,
+    checkedAt: result.savedAt,
+    confidence: scores.confidence,
+    sampleSize: scores.sampleSize,
+    demand: scores.demand.score,
+    competition: scores.competition.score,
+    opportunity: scores.opportunity.score,
+    freshness: scores.freshness.score,
+    medianViews: topics.videosUsed > 0 ? Math.round(topics.nicheMedianViews) : null,
+    bestOutlier: best
+      ? {
+          title: best.video.title,
+          url: best.video.url,
+          views: best.video.views,
+          subscribers: best.channel?.subscribers ?? null,
+          ratio: Number((best.outlierRatio ?? 0).toFixed(1)),
+        }
+      : null,
+    topTopics: topics.topics.slice(0, 3).map((t) => t.phrase),
+  };
+  row.fit = fitScore(row);
+  return { row, unitsUsed: result.unitsUsed };
+}
+
+// Best first: scored by fit, then checked but not scored, then not checked yet
+function sortRows(rows: NodeRow[]): NodeRow[] {
+  const rank = (r: NodeRow) => (r.fit !== null ? 2 : r.checked ? 1 : 0);
+  return [...rows].sort((a, b) => rank(b) - rank(a) || (b.fit ?? 0) - (a.fit ?? 0) || b.sampleSize - a.sampleSize);
+}
+
+// Free: only reads saved data, never calls YouTube
+export async function readRows(nodes: TreeNode[]): Promise<NodeRow[]> {
+  const rows: NodeRow[] = [];
+  for (const node of nodes) rows.push((await rowFor(node, true)).row);
+  return sortRows(rows);
+}
+
+export type CheckReport = {
+  rows: NodeRow[];
+  unitsUsed: number;
+  skipped: string[]; // not checked, to stay inside the budget
+  error: string | null; // e.g. quota used up: rows checked so far are still returned
+};
+
+// Spends quota: checks nodes that have no saved data yet, never going over the budget
+export async function checkNodes(
+  nodes: TreeNode[],
+  budget: number,
+  log: (line: string) => void = () => {},
+): Promise<CheckReport> {
+  const rows: NodeRow[] = [];
+  const skipped: string[] = [];
   let unitsUsed = 0;
+  let error: string | null = null;
 
-  for (const seed of SEED_NICHES) {
-    // Stop before a niche could push us over the budget (saved niches cost 0, so keep trying those)
-    const canAffordNew = unitsUsed + MAX_UNITS_PER_NICHE <= budget;
-
+  for (const node of nodes) {
+    if (error) {
+      rows.push((await rowFor(node, true)).row);
+      continue;
+    }
+    const canAfford = unitsUsed + maxUnitsFor(node.level) <= budget;
     try {
-      const result = await collectNiche(seed.query, {
-        language: "en",
-        region: "US",
-        maxAgeHours: DISCOVERY_CACHE_HOURS,
-        cacheOnly: !canAffordNew, // over budget: only use saved data, never call YouTube
-      });
-      unitsUsed += result.unitsUsed;
-
-      const scores = scoreNiche(result.exactVideos, result.channels);
-      const topics = findTopics(result);
-      const best = topics.outliers[0];
-
-      const row: DiscoveryRow = {
-        query: seed.query,
-        group: seed.group,
-        checkedAt: result.savedAt,
-        confidence: scores.confidence,
-        sampleSize: scores.sampleSize,
-        demand: scores.demand.score,
-        competition: scores.competition.score,
-        opportunity: scores.opportunity.score,
-        freshness: scores.freshness.score,
-        fit: null,
-        bestOutlier: best
-          ? {
-              title: best.video.title,
-              url: best.video.url,
-              views: best.video.views,
-              subscribers: best.channel?.subscribers ?? null,
-              ratio: Number((best.outlierRatio ?? 0).toFixed(1)),
-            }
-          : null,
-        topTopic: topics.topics[0]?.phrase ?? null,
-      };
-      row.fit = fitScore(row);
+      const { row, unitsUsed: used } = await rowFor(node, !canAfford);
+      unitsUsed += used;
       rows.push(row);
-      log(`${result.fromCache ? "📦" : "🌐"} ${seed.query}: ${row.fit === null ? scores.confidence : `fit ${row.fit}`} (${result.unitsUsed} units)`);
+      if (!row.checked) skipped.push(node.query);
+      log(`${!row.checked ? "⏳" : used === 0 ? "📦" : "🌐"} ${node.query}: ${
+        !row.checked ? "not checked yet (budget)" : row.fit === null ? `${row.confidence}` : `fit ${row.fit}`
+      } (${used} units)`);
     } catch (err: unknown) {
-      if (err instanceof NotCachedError) {
-        notCheckedYet.push(seed.query); // over budget and not saved yet: check it next run
-        continue;
-      }
-      // Quota or network problem: stop here and keep what we have
-      log(`❌ ${seed.query}: ${err instanceof Error ? err.message : String(err)}`);
-      notCheckedYet.push(...SEED_NICHES.slice(SEED_NICHES.indexOf(seed)).map((s) => s.query));
-      break;
+      error = err instanceof Error ? err.message : String(err);
+      log(`❌ ${node.query}: ${error}`);
+      rows.push(emptyRow(node));
+      skipped.push(node.query);
     }
   }
 
-  // Best first: scored niches by fit, then the rest
-  rows.sort((a, b) => (b.fit ?? -1) - (a.fit ?? -1));
-
-  const report: DiscoveryReport = {
-    ranAt: new Date().toISOString(),
-    unitsUsed,
-    checked: rows.length,
-    notCheckedYet: [...new Set(notCheckedYet)],
-    rows,
-  };
-
-  // Save the latest results, plus a dated copy for backtesting later
-  await mkdir(path.join(DATA_DIR, "history"), { recursive: true });
-  const json = JSON.stringify(report, null, 2);
-  await writeFile(LATEST_FILE, json, "utf8");
-  await writeFile(path.join(DATA_DIR, "history", `discovery-${report.ranAt.slice(0, 10)}.json`), json, "utf8");
-
-  return report;
+  return { rows: sortRows(rows), unitsUsed, skipped, error };
 }
 
-export async function readLatestDiscovery(): Promise<DiscoveryReport | null> {
-  try {
-    return JSON.parse(await readFile(LATEST_FILE, "utf8")) as DiscoveryReport;
-  } catch {
-    return null;
-  }
+// "npm run discover": checks the 10 top niches and saves a dated copy for backtesting later
+export async function runDiscovery(budget = DEFAULT_BUDGET, log: (line: string) => void = () => {}): Promise<CheckReport> {
+  const report = await checkNodes(NICHE_TREE, budget, log);
+  const dir = path.resolve("data", "history");
+  await mkdir(dir, { recursive: true });
+  const ranAt = new Date().toISOString();
+  await writeFile(path.join(dir, `niches-${ranAt.slice(0, 10)}.json`), JSON.stringify({ ranAt, ...report }, null, 2), "utf8");
+  return report;
 }

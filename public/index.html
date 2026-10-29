@@ -59,6 +59,16 @@
     tr.click { cursor: pointer; }
     tr.click:hover td { background: var(--bar); }
     .tablewrap { overflow-x: auto; }
+    .crumbs { margin: 0 0 12px; font-size: 14px; }
+    .crumbs a { cursor: pointer; }
+    .small { padding: 6px 10px; font-size: 13px; border-radius: 8px; }
+    td .small { margin: 2px 4px 2px 0; white-space: nowrap; }
+    .st-measured { color: var(--good); }
+    .st-later { color: var(--warn); }
+    .st-not-data { color: var(--muted); }
+    details summary { cursor: pointer; }
+    .charlist { columns: 2 320px; font-size: 14px; margin-top: 12px; }
+    .charlist div { break-inside: avoid; padding: 3px 0; }
     .actions .plain { background: transparent; color: var(--text); border: 1px solid var(--line); }
     .chips { margin-top: 4px; }
     .chip { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 99px; background: var(--bar); margin: 2px 4px 0 0; font-variant-numeric: tabular-nums; }
@@ -70,6 +80,24 @@
   <h1>Niche Finder</h1>
   <p class="sub">Real YouTube data for faceless creators. Every number shows its proof.</p>
 
+  <section>
+    <div class="row">
+      <h2>🧭 Pick a niche</h2>
+      <span class="meta">No typing needed: click to go deeper.</span>
+    </div>
+    <div id="crumbs" class="crumbs"></div>
+    <div id="tree"></div>
+  </section>
+
+  <section>
+    <details id="charBox" class="card">
+      <summary><strong>📋 The 100 characteristics of a profitable niche</strong> <span class="meta">(which ones this app can measure)</span></summary>
+      <div id="chars"></div>
+    </details>
+  </section>
+
+  <section>
+  <h2>🔍 Or search any topic</h2>
   <form id="search">
     <input id="q" placeholder="Type a topic, e.g. medieval or credit cards" required minlength="2" maxlength="80" />
     <select id="lang" aria-label="Language">
@@ -84,13 +112,6 @@
     <button id="go" type="submit">Analyze</button>
   </form>
   <p class="note">A new topic (or a new video type) uses up to ~510 of your 10,000 daily YouTube units. Repeating the same search within 24 hours is free.</p>
-
-  <section>
-    <div class="row">
-      <h2>🧭 Discovered niches</h2>
-      <button id="loadDiscovery" type="button" class="plain">Show ranking</button>
-    </div>
-    <div id="discovery"></div>
   </section>
 
   <div id="status" class="status hidden"></div>
@@ -324,50 +345,149 @@
     run();
   }
 
-  // ---------- Discovered niches ----------
-  document.getElementById("loadDiscovery").addEventListener("click", async () => {
-    const box = document.getElementById("discovery");
-    box.replaceChildren(el("p", { class: "meta", textContent: "Loading…" }));
+  // ---------- Niche tree ----------
+  const LEVEL_NAME = { niche: "niche", sub: "sub-niche", micro: "micro-niche" };
+  let crumbs = []; // [{ id, query }] from the top niche down
+
+  function renderCrumbs() {
+    const box = document.getElementById("crumbs");
+    const top = el("a", { textContent: "All 10 niches" });
+    top.addEventListener("click", () => { crumbs = []; loadTree(); });
+    box.replaceChildren(top);
+    crumbs.forEach((c, i) => {
+      const link = el("a", { textContent: c.query });
+      link.addEventListener("click", () => { crumbs = crumbs.slice(0, i + 1); loadTree(); });
+      box.append(" › ", link);
+    });
+  }
+
+  async function showTopics(row) {
+    const status = document.getElementById("status");
+    status.className = "status";
+    status.textContent = `Loading topics and proof for “${row.query}”…`;
+    document.getElementById("results").replaceChildren();
     try {
-      const res = await fetch("/api/discovery");
+      const res = await fetch(`/api/analyze?node=${encodeURIComponent(row.id)}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Something went wrong.");
+      status.className = "status hidden";
+      render(data);
+      document.getElementById("results").scrollIntoView({ behavior: "smooth" });
+    } catch (err) {
+      status.className = "status error";
+      status.textContent = "❌ " + err.message;
+    }
+  }
+
+  async function checkLevel(parentId, button) {
+    button.disabled = true;
+    button.textContent = "Checking… (this can take a minute)";
+    try {
+      const res = await fetch(`/api/tree/check${parentId ? "?parent=" + encodeURIComponent(parentId) : ""}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Something went wrong.");
+      await loadTree(data.error ? `⚠️ Stopped early: ${data.error}` : `✅ Done: about ${fmt(data.unitsUsed)} units used.`);
+    } catch (err) {
+      button.disabled = false;
+      button.textContent = "Try again";
+      alert(err.message);
+    }
+  }
+
+  async function loadTree(message) {
+    renderCrumbs();
+    const box = document.getElementById("tree");
+    box.replaceChildren(el("p", { class: "meta", textContent: "Loading…" }));
+    const parentId = crumbs.length ? crumbs[crumbs.length - 1].id : "";
+    try {
+      const res = await fetch(`/api/tree${parentId ? "?parent=" + encodeURIComponent(parentId) : ""}`);
       const d = await res.json();
       if (!res.ok) throw new Error(d.error);
+
+      const levelName = d.rows.length ? LEVEL_NAME[d.rows[0].level] + "s" : "niches";
+      const intro = [];
+      if (message) intro.push(el("p", { class: "status", textContent: message }));
+      if (d.unchecked > 0) {
+        const btn = el("button", { type: "button", textContent: `Check ${d.unchecked} ${levelName} with YouTube data (up to ~${fmt(d.unitsToCheck)} units)` });
+        btn.addEventListener("click", () => checkLevel(parentId, btn));
+        intro.push(el("div", { class: "card" },
+          el("p", { class: "meta", textContent: crumbs.length === 0
+            ? `${d.unchecked} of 10 niches have no data yet. One click checks as many as fit in about 4,500 units; the rest can be checked tomorrow. Saved results stay free for 7 days.`
+            : `${d.unchecked} ${levelName} have no data yet. Saved results stay free for 7 days.` }),
+          btn,
+        ));
+      }
+
       const n = (v) => (v === null ? "—" : v);
       const table = el("table", {},
-        el("tr", {}, ...["#", "Niche", "Fit", "Demand", "Competition", "Opportunity", "Freshness", "Confidence", "Best proof"].map((h) => el("th", { textContent: h }))),
+        el("tr", {}, ...["#", LEVEL_NAME[d.rows[0]?.level ?? "niche"], "Fit", "Demand", "Competition", "Opportunity", "Freshness", "Confidence", "Popular topics", ""].map((h) => el("th", { textContent: h }))),
       );
       d.rows.forEach((r, i) => {
-        const proof = r.bestOutlier
-          ? el("a", { href: r.bestOutlier.url, target: "_blank", rel: "noopener", textContent: `${r.bestOutlier.ratio}× · ${r.bestOutlier.title}` })
-          : "—";
-        const row = el("tr", { class: "click", title: "Click to open the full analysis" },
+        const actions = el("td", {});
+        if (r.childCount > 0) {
+          const open = el("button", { type: "button", class: "small", textContent: `Open ${r.childCount} ${LEVEL_NAME[r.level === "niche" ? "sub" : "micro"]}s ▸` });
+          open.addEventListener("click", () => { crumbs.push({ id: r.id, query: r.query }); loadTree(); });
+          actions.append(open);
+        }
+        if (r.checked) {
+          const topics = el("button", { type: "button", class: "small plain", textContent: "Topics & proof" });
+          topics.addEventListener("click", () => showTopics(r));
+          actions.append(topics);
+        }
+        const topicChips = el("div", {});
+        r.topTopics.forEach((t) => topicChips.append(el("span", { class: "chip", textContent: t })));
+        if (r.bestOutlier) {
+          topicChips.append(el("div", { class: "meta" },
+            el("a", { href: r.bestOutlier.url, target: "_blank", rel: "noopener", textContent: `${r.bestOutlier.ratio}× · ${r.bestOutlier.title}` })));
+        }
+        table.append(el("tr", {},
           el("td", { class: "n", textContent: i + 1 }),
           el("td", {}, el("strong", { textContent: r.query }), el("div", { class: "meta", textContent: r.group })),
-          el("td", { class: "n", textContent: r.fit === null ? "not scored" : r.fit }),
+          el("td", { class: "n", textContent: !r.checked ? "not checked" : r.fit === null ? "not scored" : r.fit }),
           el("td", { class: "n", textContent: n(r.demand) }),
           el("td", { class: "n", textContent: n(r.competition) }),
           el("td", { class: "n", textContent: n(r.opportunity) }),
           el("td", { class: "n", textContent: n(r.freshness) }),
-          el("td", { textContent: `${r.confidence} (${r.sampleSize})` }),
-          el("td", {}, proof),
-        );
-        row.addEventListener("click", (e) => {
-          if (e.target.tagName === "A") return; // clicking the proof link just opens YouTube
-          document.getElementById("q").value = r.query;
-          document.getElementById("lang").value = "en";
-          document.getElementById("format").value = "long";
-          document.getElementById("search").requestSubmit();
-        });
-        table.append(row);
+          el("td", { textContent: r.checked ? `${r.confidence} (${r.sampleSize})` : "—" }),
+          el("td", {}, r.checked ? topicChips : "—"),
+          actions,
+        ));
       });
-      box.replaceChildren(
-        el("p", { class: "meta", textContent: `Last run ${new Date(d.ranAt).toLocaleString()} · ${d.checked} niches checked · ${d.notCheckedYet.length} not checked yet. Fit = average of Demand, Opportunity, Freshness and (100 − Competition): a sorting aid, not a prediction. Money is not included (no real ad-rate data yet).` }),
-        el("div", { class: "card tablewrap" }, table),
-      );
+
+      box.replaceChildren(...intro, el("div", { class: "card tablewrap" }, table),
+        el("p", { class: "meta", textContent: "Fit = average of Demand, Opportunity, Freshness and (100 − Competition): a sorting aid, not a prediction. “Not scored” = fewer than 30 verified videos. Money isn't included yet (no real ad-rate data)." }));
     } catch (err) {
       box.replaceChildren(el("p", { class: "status error", textContent: "❌ " + err.message }));
     }
+  }
+
+  // ---------- 100 characteristics ----------
+  document.getElementById("charBox").addEventListener("toggle", async (e) => {
+    const box = document.getElementById("chars");
+    if (!e.target.open || box.childElementCount) return;
+    const list = await (await fetch("/api/characteristics")).json();
+    const LABEL = { measured: "✅ measured", later: "🔜 can add later", "not-data": "👤 you judge it" };
+    const counts = { measured: 0, later: 0, "not-data": 0 };
+    list.forEach((c) => counts[c.status]++);
+    const groups = el("div", { class: "charlist" });
+    let current = "";
+    list.forEach((c) => {
+      if (c.group !== current) {
+        current = c.group;
+        groups.append(el("div", {}, el("strong", { textContent: c.group })));
+      }
+      groups.append(el("div", {},
+        `${c.n}. ${c.text} `,
+        el("span", { class: "st-" + c.status, textContent: LABEL[c.status] + (c.how ? ` (${c.how})` : "") }),
+      ));
+    });
+    box.replaceChildren(
+      el("p", { class: "meta", textContent: `${counts.measured} measured with real YouTube data · ${counts.later} possible later · ${counts["not-data"]} free YouTube data can't show (the app won't guess).` }),
+      groups,
+    );
   });
+
+  loadTree();
 
   document.getElementById("search").addEventListener("submit", async (e) => {
     e.preventDefault();
