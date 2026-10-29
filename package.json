@@ -1,0 +1,24 @@
+{
+  "name": "niche-finder",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Niche and topic finder for faceless YouTube creators, using real YouTube data",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "fetch-test": "tsx src/scripts/fetchTest.ts",
+    "niche-test": "tsx src/scripts/nicheTest.ts",
+    "build": "tsc",
+    "start": "node dist/server.js"
+  },
+  "dependencies": {
+    "dotenv": "^18.0.9",
+    "express": "^5.3.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^26.6.6",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}
