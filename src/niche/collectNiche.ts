@@ -14,7 +14,7 @@ import {
 export const MIN_VIDEOS = 30;
 
 // Safety cap: never fetch more than this many search pages per niche
-export const DEFAULT_MAX_PAGES = 3;
+export const DEFAULT_MAX_PAGES = 5;
 
 // What we save in the cache: YouTube's raw answer, before filtering
 type RawNicheData = {
@@ -110,7 +110,7 @@ export async function collectNiche(
   const maxPages = options.maxPages ?? DEFAULT_MAX_PAGES;
   const format = options.format ?? "long";
   const cleanQuery = query.trim().toLowerCase();
-  const key = `niche:v6:${language}:${region}:${months}m:p${maxPages}:${format}:${targetCountries.join("-")}:${cleanQuery}`;
+  const key = `niche:v7:${language}:${region}:${months}m:p${maxPages}:${format}:${targetCountries.join("-")}:${cleanQuery}`;
 
   // 1. Get raw data page by page (from cache if saved in the last 24 hours)
   const raw = await cached<RawNicheData>(key, 24, async () => {

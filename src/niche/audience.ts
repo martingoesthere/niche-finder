@@ -26,6 +26,14 @@ function baseLanguage(code: string | null): string | null {
   return NOT_A_LANGUAGE.has(base) ? null : base;
 }
 
+// "en-US" -> "US" (only when the language matches the target language)
+function regionOf(code: string | null, language: string): string | null {
+  if (!code) return null;
+  const [base, region] = code.split("-");
+  if (!region || base.toLowerCase() !== language) return null;
+  return region.toUpperCase();
+}
+
 function nonLatinShare(title: string): number {
   const letters = title.match(/\p{L}/gu) ?? [];
   if (letters.length === 0) return 0;
@@ -50,8 +58,12 @@ export function filterAudience(
     );
     const scriptShare = nonLatinShare(video.title);
 
-    // 1. Channel didn't say its country: we can't verify it, so we don't count it
-    if (country === null) {
+    // 1. Channel didn't say its country. A regional language tag on the video
+    //    (like "en-US" or "en-GB") is real proof of the audience, so we keep those.
+    //    A plain "en" tag is not enough (many channels outside the target use it).
+    const taggedRegion = regionOf(video.audioLanguage ?? video.textLanguage, language);
+    const verifiedByTag = taggedRegion !== null && allowedCountries.includes(taggedRegion);
+    if (country === null && !verifiedByTag) {
       unknownCountry++;
       removed.push({
         video,
@@ -62,7 +74,7 @@ export function filterAudience(
     }
 
     // 2. Channel is from a non-target country
-    if (!allowedCountries.includes(country)) {
+    if (country !== null && !allowedCountries.includes(country)) {
       removed.push({
         video,
         filter: "country",
