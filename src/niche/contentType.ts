@@ -8,15 +8,14 @@ export type VideoFormat = "long" | "short" | "all";
 export const SHORTS_MAX_SECONDS = 180;
 
 // YouTube categories that are almost never real explainer / how-to content.
-// Tune this list in Step 6 if real finance or history videos get removed.
+// Step 6 test ("medieval life"): many real history channels use "Entertainment"
+// and animated explainers use "Film & Animation", so those two are NOT blocked.
 export const BLOCKED_CATEGORIES: Record<string, string> = {
-  "1": "Film & Animation",
   "10": "Music",
   "15": "Pets & Animals",
   "17": "Sports",
   "20": "Gaming",
   "23": "Comedy",
-  "24": "Entertainment",
 };
 
 export type ContentTypeResult = {
