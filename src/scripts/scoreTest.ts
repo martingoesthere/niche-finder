@@ -33,7 +33,7 @@ try {
   );
   const count = (filter: string) => result.removed.filter((r) => r.filter === filter).length;
   console.log(
-    `Removed: ${count("topic")} off-topic | ${count("country")} wrong/unknown country | ${count("language")} wrong language | ${count("format")} Shorts | ${count("category")} entertainment`,
+    `Removed: ${count("topic")} off-topic | ${count("country")} wrong/unknown country | ${count("language")} wrong language | ${count("format")} Shorts | ${count("category")} music/gaming/comedy`,
   );
   console.log(`Sample: ${scores.sampleSize} verified long videos | Confidence: ${scores.confidence.toUpperCase()}\n`);
 

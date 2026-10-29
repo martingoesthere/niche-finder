@@ -95,6 +95,7 @@ function applyFilters(
     exactType,
     broadType,
     keptCount: exactType.kept.length + broadType.kept.length,
+    exactCount: exactType.kept.length, // the scores use exact matches only
   };
 }
 
@@ -109,7 +110,7 @@ export async function collectNiche(
   const maxPages = options.maxPages ?? DEFAULT_MAX_PAGES;
   const format = options.format ?? "long";
   const cleanQuery = query.trim().toLowerCase();
-  const key = `niche:v5:${language}:${region}:${months}m:p${maxPages}:${format}:${targetCountries.join("-")}:${cleanQuery}`;
+  const key = `niche:v6:${language}:${region}:${months}m:p${maxPages}:${format}:${targetCountries.join("-")}:${cleanQuery}`;
 
   // 1. Get raw data page by page (from cache if saved in the last 24 hours)
   const raw = await cached<RawNicheData>(key, 24, async () => {
@@ -159,7 +160,7 @@ export async function collectNiche(
       }
 
       // Enough kept videos? Stop early and save quota.
-      const { keptCount } = applyFilters(
+      const { exactCount } = applyFilters(
         videos,
         channels,
         cleanQuery,
@@ -167,8 +168,8 @@ export async function collectNiche(
         language,
         format,
       );
-      if (keptCount >= MIN_VIDEOS) {
-        stoppedBecause = `reached ${MIN_VIDEOS}+ kept videos`;
+      if (exactCount >= MIN_VIDEOS) {
+        stoppedBecause = `reached ${MIN_VIDEOS}+ exact-match videos`;
         break;
       }
 
