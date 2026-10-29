@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Niche Finder</title>
+  <style>
+    :root {
+      --bg: #f6f5f2; --card: #ffffff; --text: #1d1d1b; --muted: #6b6a66; --line: #e4e2dc;
+      --accent: #c2410c; --good: #15803d; --warn: #b45309; --bar: #e9e6df;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #161614; --card: #201f1c; --text: #f1efe9; --muted: #a19e96; --line: #34322d;
+        --accent: #fb923c; --good: #4ade80; --warn: #fbbf24; --bar: #34322d;
+      }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+    main { max-width: 900px; margin: 0 auto; padding: 32px 16px 64px; }
+    h1 { margin: 0 0 4px; font-size: 28px; }
+    .sub { color: var(--muted); margin: 0 0 24px; }
+    form { display: flex; gap: 8px; flex-wrap: wrap; }
+    input, select, button { font: inherit; border-radius: 10px; border: 1px solid var(--line); padding: 10px 14px; background: var(--card); color: var(--text); }
+    input { flex: 1 1 260px; }
+    button { background: var(--accent); color: #fff; border: none; font-weight: 600; cursor: pointer; }
+    button:disabled { opacity: .6; cursor: wait; }
+    .note { color: var(--muted); font-size: 14px; margin: 8px 0 0; }
+    .status { margin: 24px 0 0; padding: 12px 16px; border-radius: 10px; background: var(--card); border: 1px solid var(--line); }
+    .status.error { border-color: var(--accent); color: var(--accent); }
+    section { margin-top: 32px; }
+    h2 { font-size: 20px; margin: 0 0 12px; }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px; margin-bottom: 12px; }
+    .row { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+    .name { font-weight: 700; }
+    .num { font-variant-numeric: tabular-nums; font-weight: 700; font-size: 22px; }
+    .meaning, .expl, .meta { color: var(--muted); font-size: 14px; }
+    .bar { height: 8px; background: var(--bar); border-radius: 99px; overflow: hidden; margin: 8px 0; }
+    .bar > div { height: 100%; background: var(--accent); }
+    .badge { display: inline-block; padding: 2px 10px; border-radius: 99px; font-size: 13px; font-weight: 600; background: var(--bar); margin: 2px 4px 2px 0; }
+    .conf-low, .conf-not { color: var(--warn); }
+    .conf-medium, .conf-high { color: var(--good); }
+    ul.proof { list-style: none; padding: 0; margin: 8px 0 0; }
+    ul.proof li { padding: 6px 0; border-top: 1px solid var(--line); font-size: 14px; }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Niche Finder</h1>
+  <p class="sub">Real YouTube data for faceless creators. Every number shows its proof.</p>
+
+  <form id="search">
+    <input id="q" placeholder="Type a topic, e.g. medieval or credit cards" required minlength="2" maxlength="80" />
+    <select id="lang" aria-label="Language">
+      <option value="en">English (US, UK, CA, AU)</option>
+      <option value="es">Spanish (US, MX, ES, CO…)</option>
+    </select>
+    <button id="go" type="submit">Analyze</button>
+  </form>
+  <p class="note">A new topic uses up to ~510 of your 10,000 daily YouTube units. Repeating a topic within 24 hours is free.</p>
+
+  <div id="status" class="status hidden"></div>
+  <div id="results"></div>
+</main>
+
+<script>
+  const fmt = (n) => (n === null || n === undefined ? "hidden" : Math.round(n).toLocaleString("en-US"));
+  const TAGS = { outlier: "🎯 outlier", repeated: "🔁 repeated success", momentum: "🚀 momentum", gap: "🕳️ gap" };
+  const REMOVED = { topic: "off-topic", country: "wrong/unknown country", language: "wrong language", format: "Shorts", category: "not explainers" };
+
+  // Build elements safely: YouTube titles are shown as plain text, never as HTML
+  function el(tag, props = {}, ...children) {
+    const node = document.createElement(tag);
+    for (const [k, v] of Object.entries(props)) {
+      if (k === "class") node.className = v;
+      else if (k === "style") node.style.cssText = v;
+      else node[k] = v;
+    }
+    for (const c of children) if (c !== null && c !== undefined) node.append(c);
+    return node;
+  }
+
+  function videoItem(v, extra) {
+    return el("li", {},
+      el("a", { href: v.url, target: "_blank", rel: "noopener", textContent: v.title }),
+      el("div", { class: "meta", textContent: `${fmt(v.views)} views · ${fmt(v.subscribers)} subs · ${v.channelTitle}${extra ? " · " + extra : ""}` }),
+    );
+  }
+
+  function scoreCard(s) {
+    const proof = el("ul", { class: "proof" });
+    for (const p of s.proof) {
+      proof.append(el("li", {},
+        el("a", { href: p.url, target: "_blank", rel: "noopener", textContent: p.label }),
+        el("div", { class: "meta", textContent: p.detail }),
+      ));
+    }
+    return el("div", { class: "card" },
+      el("div", { class: "row" },
+        el("span", { class: "name", textContent: s.name }),
+        el("span", { class: "num", textContent: s.score === null ? "not scored" : s.score }),
+      ),
+      s.score === null ? null : el("div", { class: "bar" }, el("div", { style: `width:${s.score}%` })),
+      el("div", { class: "meaning", textContent: s.meaning }),
+      el("div", { class: "expl", textContent: s.explanation }),
+      s.proof.length ? proof : null,
+    );
+  }
+
+  function render(d) {
+    const out = document.getElementById("results");
+    out.replaceChildren();
+
+    const removedText = Object.entries(d.removed).map(([k, n]) => `${n} ${REMOVED[k] ?? k}`).join(" · ") || "none";
+    const confClass = "conf-" + d.confidence.split(" ")[0];
+    out.append(el("section", {},
+      el("div", { class: "card" },
+        el("div", { class: "row" },
+          el("span", { class: "name", textContent: `“${d.query}” · ${d.targetCountries.join(", ")}` }),
+          el("span", { class: confClass, textContent: "Confidence: " + d.confidence }),
+        ),
+        el("div", { class: "meta", textContent: d.fromCache ? `From cache (saved ${new Date(d.savedAt).toLocaleString()}) · 0 units used` : `Fresh from YouTube · about ${d.unitsUsed} units used` }),
+        el("div", { class: "meta", textContent: `${d.totalFound} videos found · ${d.sampleSize} verified long videos used · removed: ${removedText}` }),
+        el("div", { class: "meta", textContent: d.windows.map((w) => `last ${w.months} months: ${w.videos} videos, median ${fmt(w.medianViews)}`).join(" · ") }),
+      ),
+    ));
+
+    const scores = el("section", {}, el("h2", { textContent: "Niche scores" }));
+    d.scores.forEach((s) => scores.append(scoreCard(s)));
+    out.append(scores);
+
+    const topics = el("section", {}, el("h2", { textContent: "Topic ideas (from real titles, 2+ channels)" }));
+    if (!d.topics.length) topics.append(el("p", { class: "meta", textContent: "None found with enough data." }));
+    d.topics.forEach((t, i) => {
+      const proof = el("ul", { class: "proof" });
+      t.proof.forEach((v) => proof.append(videoItem(v, `${fmt(v.viewsPerDay)} views/day`)));
+      const tags = el("div", {});
+      (t.tags.length ? t.tags : []).forEach((tag) => tags.append(el("span", { class: "badge", textContent: TAGS[tag] })));
+      topics.append(el("div", { class: "card" },
+        el("div", { class: "name", textContent: `${i + 1}. “${t.phrase}”` }),
+        tags,
+        el("div", { class: "meta", textContent: `${t.videoCount} videos · ${t.channelCount} channels · median ${fmt(t.medianViews)} views · ${fmt(t.medianViewsPerDay)} views/day · ${t.recentVideos} in last 90 days` }),
+        proof,
+      ));
+    });
+    out.append(topics);
+
+    const outliers = el("ul", { class: "proof" });
+    d.outliers.forEach((v) => outliers.append(videoItem(v, `${v.outlierRatio}× its channel's average of ${fmt(v.channelAvgViews)}`)));
+    out.append(el("section", {}, el("h2", { textContent: "🎯 Outliers (3×+ their channel's normal)" }),
+      el("div", { class: "card" }, d.outliers.length ? outliers : el("p", { class: "meta", textContent: "None." }))));
+
+    const momentum = el("ul", { class: "proof" });
+    d.momentum.forEach((v) => momentum.append(videoItem(v, `${fmt(v.viewsPerDay)} views/day, ${v.ageDays} days old`)));
+    out.append(el("section", {}, el("h2", { textContent: "🚀 Momentum (last 90 days)" }),
+      el("div", { class: "card" }, d.momentum.length ? momentum : el("p", { class: "meta", textContent: "None." }))));
+  }
+
+  document.getElementById("search").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const q = document.getElementById("q").value.trim();
+    const lang = document.getElementById("lang").value;
+    const status = document.getElementById("status");
+    const button = document.getElementById("go");
+
+    button.disabled = true;
+    status.className = "status";
+    status.textContent = `Analyzing “${q}”… (a new topic can take 10–20 seconds)`;
+    document.getElementById("results").replaceChildren();
+
+    try {
+      const res = await fetch(`/api/analyze?q=${encodeURIComponent(q)}&lang=${lang}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Something went wrong.");
+      status.className = "status hidden";
+      render(data);
+    } catch (err) {
+      status.className = "status error";
+      status.textContent = "❌ " + err.message;
+    } finally {
+      button.disabled = false;
+    }
+  });
+</script>
+</body>
+</html>
