@@ -45,6 +45,16 @@
     a { color: var(--accent); text-decoration: none; }
     a:hover { text-decoration: underline; }
     .hidden { display: none; }
+    .filters { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px 16px; }
+    .filters label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+    .pair { display: flex; gap: 6px; align-items: center; }
+    .pair input, .filters select { width: 100%; min-width: 0; padding: 8px 10px; flex: 1 1 0; }
+    .unavailable { color: var(--muted); font-size: 13px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+    .actions { display: flex; gap: 8px; margin-top: 12px; justify-content: flex-end; flex-wrap: wrap; }
+    .actions .plain { background: transparent; color: var(--text); border: 1px solid var(--line); }
+    .chips { margin-top: 4px; }
+    .chip { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 99px; background: var(--bar); margin: 2px 4px 0 0; font-variant-numeric: tabular-nums; }
+    .chip.hot { color: var(--good); font-weight: 700; }
   </style>
 </head>
 <body>
@@ -58,9 +68,14 @@
       <option value="en">English (US, UK, CA, AU)</option>
       <option value="es">Spanish (US, MX, ES, CO…)</option>
     </select>
+    <select id="format" aria-label="Video type">
+      <option value="long">Long videos</option>
+      <option value="short">Shorts</option>
+      <option value="all">Long + Shorts</option>
+    </select>
     <button id="go" type="submit">Analyze</button>
   </form>
-  <p class="note">A new topic uses up to ~510 of your 10,000 daily YouTube units. Repeating a topic within 24 hours is free.</p>
+  <p class="note">A new topic (or a new video type) uses up to ~510 of your 10,000 daily YouTube units. Repeating the same search within 24 hours is free.</p>
 
   <div id="status" class="status hidden"></div>
   <div id="results"></div>
@@ -157,6 +172,140 @@
     d.momentum.forEach((v) => momentum.append(videoItem(v, `${fmt(v.viewsPerDay)} views/day, ${v.ageDays} days old`)));
     out.append(el("section", {}, el("h2", { textContent: "🚀 Momentum (last 90 days)" }),
       el("div", { class: "card" }, d.momentum.length ? momentum : el("p", { class: "meta", textContent: "None." }))));
+
+    renderExplorer(d.videos, out);
+  }
+
+  // ---------- Video Explorer (filters run in the browser: free, no quota) ----------
+  const DAY = 86400000;
+  const RANGES = [
+    { key: "avgViews", label: "Average views (channel)", get: (v) => v.channelAvgViews },
+    { key: "duration", label: "Video duration (minutes)", get: (v) => v.durationSeconds / 60 },
+    { key: "ratio", label: "Outlier score (× channel average)", get: (v) => v.ratioVsChannel },
+    { key: "subs", label: "Subscribers", get: (v) => v.subscribers },
+    { key: "views", label: "Video views", get: (v) => v.views },
+    { key: "count", label: "Channel video count", get: (v) => v.channelVideoCount },
+  ];
+  const SORTS = {
+    ratio: { label: "Outlier score", get: (v) => v.ratioVsChannel ?? -1 },
+    avgViews: { label: "Average views", get: (v) => v.channelAvgViews ?? -1 },
+    views: { label: "Video views", get: (v) => v.views },
+    subs: { label: "Subscribers", get: (v) => v.subscribers ?? -1 },
+    duration: { label: "Video duration", get: (v) => v.durationSeconds },
+    published: { label: "Video published date", get: (v) => new Date(v.publishedAt).getTime() },
+    created: { label: "Channel created date", get: (v) => (v.channelCreatedAt ? new Date(v.channelCreatedAt).getTime() : 0) },
+  };
+
+  function selectEl(id, options) {
+    const s = el("select", { id });
+    for (const [value, text] of options) s.append(el("option", { value, textContent: text }));
+    return s;
+  }
+
+  function renderExplorer(videos, container) {
+    const panel = el("div", { class: "filters" });
+    for (const r of RANGES) {
+      panel.append(el("div", {},
+        el("label", { textContent: r.label }),
+        el("div", { class: "pair" },
+          el("input", { id: `min-${r.key}`, type: "number", min: 0, placeholder: "min" }),
+          el("span", { textContent: "to" }),
+          el("input", { id: `max-${r.key}`, type: "number", min: 0, placeholder: "max" }),
+        ),
+      ));
+    }
+    panel.append(el("div", {}, el("label", { textContent: "Video upload date" }),
+      selectEl("f-uploaded", [["", "Any time"], ["7", "Last 7 days"], ["30", "Last 30 days"], ["90", "Last 90 days"], ["180", "Last 6 months"], ["365", "Last 12 months"]])));
+    panel.append(el("div", {}, el("label", { textContent: "Channel created" }),
+      selectEl("f-created", [["", "Any time"], ["90", "Last 90 days"], ["180", "Last 6 months"], ["365", "Under 1 year old"], ["730", "Under 2 years old"]])));
+    const countries = [...new Set(videos.map((v) => v.country ?? "not set"))].sort();
+    panel.append(el("div", {}, el("label", { textContent: "Country" }),
+      selectEl("f-country", [["", "All countries"], ...countries.map((c) => [c, c])])));
+    const langs = [...new Set(videos.map((v) => v.language ?? "not set"))].sort();
+    panel.append(el("div", {}, el("label", { textContent: "Language tag" }),
+      selectEl("f-language", [["", "All languages"], ...langs.map((l) => [l, l])])));
+    panel.append(el("div", {}, el("label", { textContent: "Sort by" }),
+      selectEl("f-sort", Object.entries(SORTS).map(([k, s]) => [k, s.label]))));
+    panel.append(el("div", {}, el("label", { textContent: "Sort order" }),
+      selectEl("f-order", [["desc", "Highest / newest first"], ["asc", "Lowest / oldest first"]])));
+
+    const count = el("div", { class: "meta" });
+    const list = el("ul", { class: "proof" });
+    const apply = el("button", { type: "button", textContent: "Apply filters" });
+    const reset = el("button", { type: "button", class: "plain", textContent: "Reset filters" });
+
+    function run() {
+      const now = Date.now();
+      const num = (id) => {
+        const raw = document.getElementById(id).value;
+        return raw === "" ? null : Number(raw);
+      };
+      const uploaded = document.getElementById("f-uploaded").value;
+      const created = document.getElementById("f-created").value;
+      const country = document.getElementById("f-country").value;
+      const language = document.getElementById("f-language").value;
+
+      let rows = videos.filter((v) => {
+        for (const r of RANGES) {
+          const min = num(`min-${r.key}`);
+          const max = num(`max-${r.key}`);
+          if (min === null && max === null) continue;
+          const value = r.get(v);
+          if (value === null || value === undefined) return false; // hidden data can't pass a filter
+          if (min !== null && value < min) return false;
+          if (max !== null && value > max) return false;
+        }
+        if (uploaded && now - new Date(v.publishedAt).getTime() > Number(uploaded) * DAY) return false;
+        if (created && (!v.channelCreatedAt || now - new Date(v.channelCreatedAt).getTime() > Number(created) * DAY)) return false;
+        if (country && (v.country ?? "not set") !== country) return false;
+        if (language && (v.language ?? "not set") !== language) return false;
+        return true;
+      });
+
+      const sort = SORTS[document.getElementById("f-sort").value];
+      const dir = document.getElementById("f-order").value === "asc" ? 1 : -1;
+      rows.sort((a, b) => (sort.get(a) - sort.get(b)) * dir);
+
+      count.textContent = `${rows.length} of ${videos.length} verified videos`;
+      list.replaceChildren();
+      for (const v of rows) {
+        const chips = el("div", { class: "chips" },
+          el("span", { class: "chip", textContent: `${fmt(v.views)} views` }),
+          el("span", { class: "chip" + ((v.ratioVsChannel ?? 0) >= 3 ? " hot" : ""), textContent: v.ratioVsChannel === null ? "outlier n/a" : `${v.ratioVsChannel}× channel avg` }),
+          el("span", { class: "chip", textContent: `${fmt(v.subscribers)} subs` }),
+          el("span", { class: "chip", textContent: `avg ${fmt(v.channelAvgViews)} views` }),
+          el("span", { class: "chip", textContent: `${Math.round(v.durationSeconds / 60)} min` }),
+          el("span", { class: "chip", textContent: `${fmt(v.viewsPerDay)} views/day` }),
+          el("span", { class: "chip", textContent: `uploaded ${v.publishedAt.slice(0, 10)}` }),
+          el("span", { class: "chip", textContent: `channel since ${(v.channelCreatedAt ?? "?").slice(0, 10)}` }),
+          el("span", { class: "chip", textContent: `${fmt(v.channelVideoCount)} videos` }),
+          el("span", { class: "chip", textContent: `${v.country ?? "country not set"} · ${v.language ?? "lang not set"}` }),
+        );
+        list.append(el("li", {},
+          el("a", { href: v.url, target: "_blank", rel: "noopener", textContent: v.title }),
+          el("div", { class: "meta", textContent: v.channelTitle }),
+          chips,
+        ));
+      }
+    }
+
+    apply.addEventListener("click", run);
+    reset.addEventListener("click", () => {
+      panel.querySelectorAll("input").forEach((i) => (i.value = ""));
+      panel.querySelectorAll("select").forEach((s) => (s.selectedIndex = 0));
+      run();
+    });
+
+    container.append(el("section", {},
+      el("h2", { textContent: "🔎 Video explorer" }),
+      el("div", { class: "card" },
+        panel,
+        el("div", { class: "unavailable", textContent: "AI content · Faceless · Qualified: not available. YouTube doesn't provide this data, and this app won't guess." }),
+        el("div", { class: "actions" }, reset, apply),
+      ),
+      el("div", { class: "card" }, count, list),
+    ));
+    run();
   }
 
   document.getElementById("search").addEventListener("submit", async (e) => {
@@ -172,7 +321,8 @@
     document.getElementById("results").replaceChildren();
 
     try {
-      const res = await fetch(`/api/analyze?q=${encodeURIComponent(q)}&lang=${lang}`);
+      const format = document.getElementById("format").value;
+      const res = await fetch(`/api/analyze?q=${encodeURIComponent(q)}&lang=${lang}&format=${format}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Something went wrong.");
       status.className = "status hidden";

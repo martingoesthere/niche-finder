@@ -10,13 +10,23 @@ const app = express();
 // The search page lives in the "public" folder
 app.use(express.static("public"));
 
-// Smaller video shape for the page (only what it shows)
+// Smaller video shape for the page (only what it shows and filters on)
 function videoForPage(s: VideoSignal) {
   return {
     title: s.video.title,
     url: s.video.url,
     views: s.video.views,
+    publishedAt: s.video.publishedAt,
+    durationSeconds: s.video.durationSeconds,
+    language: s.video.audioLanguage ?? s.video.textLanguage,
     channelTitle: s.video.channelTitle,
+    channelUrl: s.channel?.url ?? null,
+    country: s.channel?.country ?? null,
+    channelCreatedAt: s.channel?.createdAt ?? null,
+    channelVideoCount: s.channel?.videoCount ?? null,
+    // views vs the channel's own average, for every channel (giants included), used by the Explorer
+    ratioVsChannel:
+      s.channelAvgViews && s.channelAvgViews > 0 ? Number((s.video.views / s.channelAvgViews).toFixed(1)) : null,
     subscribers: s.channel?.subscribers ?? null,
     viewsPerDay: Math.round(s.viewsPerDay),
     ageDays: Math.round(s.ageDays),
@@ -29,6 +39,7 @@ function videoForPage(s: VideoSignal) {
 app.get("/api/analyze", async (req: Request, res: Response) => {
   const query = String(req.query.q ?? "").trim();
   const language = req.query.lang === "es" ? "es" : "en";
+  const format = req.query.format === "short" || req.query.format === "all" ? req.query.format : "long";
 
   if (query.length < 2 || query.length > 80) {
     res.status(400).json({ error: "Type a topic between 2 and 80 characters." });
@@ -36,7 +47,7 @@ app.get("/api/analyze", async (req: Request, res: Response) => {
   }
 
   try {
-    const result = await collectNiche(query, { language, region: language === "es" ? "MX" : "US" });
+    const result = await collectNiche(query, { language, format, region: language === "es" ? "MX" : "US" });
     const scores = scoreNiche(result.exactVideos, result.channels);
     const topics = findTopics(result);
 
@@ -69,6 +80,8 @@ app.get("/api/analyze", async (req: Request, res: Response) => {
         recentVideos: t.recentVideos,
         proof: t.videos.slice(0, 3).map(videoForPage),
       })),
+      format: result.format,
+      videos: topics.all.map(videoForPage),
       outliers: topics.outliers.slice(0, 5).map(videoForPage),
       momentum: topics.momentum.slice(0, 5).map(videoForPage),
     });

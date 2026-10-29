@@ -51,6 +51,7 @@ export type TopicReport = {
   videosUsed: number;
   nicheMedianViews: number;
   nicheMedianViewsPerDay: number;
+  all: VideoSignal[]; // every verified video, for the Video Explorer
   outliers: VideoSignal[];
   momentum: VideoSignal[];
   topics: TopicIdea[];
@@ -156,5 +157,5 @@ export function findTopics(result: NicheResult, now = new Date()): TopicReport {
       b.tags.length - a.tags.length || b.channelCount - a.channelCount || b.medianViews - a.medianViews,
   );
 
-  return { videosUsed: signals.length, nicheMedianViews, nicheMedianViewsPerDay, outliers, momentum, topics };
+  return { videosUsed: signals.length, all: signals, nicheMedianViews, nicheMedianViewsPerDay, outliers, momentum, topics };
 }
