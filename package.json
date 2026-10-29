@@ -8,6 +8,7 @@
     "dev": "tsx watch src/server.ts",
     "fetch-test": "tsx src/scripts/fetchTest.ts",
     "niche-test": "tsx src/scripts/nicheTest.ts",
+    "score-test": "tsx src/scripts/scoreTest.ts",
     "build": "tsc",
     "start": "node dist/server.js"
   },
