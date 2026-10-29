@@ -20,7 +20,7 @@ export const BLOCKED_CATEGORIES: Record<string, string> = {
 
 // Title words that mean "this is not an explainer" (found while testing "medieval")
 export const NON_EXPLAINER_WORDS = [
-  "music", "song", "songs", "lullaby", "for kids", "nursery", "full movie", "trailer", "challenge",
+  "music", "song", "songs", "lullaby", "for kids", "nursery", "full movie", "movie", "trailer", "challenge",
   "gameplay", "playthrough", "minecraft", "soundtrack", "ambience", "ambient", "playlist", "dance",
 ];
 
