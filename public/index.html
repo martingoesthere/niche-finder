@@ -51,6 +51,14 @@
     .pair input, .filters select { width: 100%; min-width: 0; padding: 8px 10px; flex: 1 1 0; }
     .unavailable { color: var(--muted); font-size: 13px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
     .actions { display: flex; gap: 8px; margin-top: 12px; justify-content: flex-end; flex-wrap: wrap; }
+    .plain { background: transparent; color: var(--text); border: 1px solid var(--line); }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th, td { text-align: left; padding: 8px 6px; border-top: 1px solid var(--line); vertical-align: top; }
+    th { color: var(--muted); font-weight: 600; font-size: 12px; }
+    td.n { font-variant-numeric: tabular-nums; text-align: right; }
+    tr.click { cursor: pointer; }
+    tr.click:hover td { background: var(--bar); }
+    .tablewrap { overflow-x: auto; }
     .actions .plain { background: transparent; color: var(--text); border: 1px solid var(--line); }
     .chips { margin-top: 4px; }
     .chip { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 99px; background: var(--bar); margin: 2px 4px 0 0; font-variant-numeric: tabular-nums; }
@@ -76,6 +84,14 @@
     <button id="go" type="submit">Analyze</button>
   </form>
   <p class="note">A new topic (or a new video type) uses up to ~510 of your 10,000 daily YouTube units. Repeating the same search within 24 hours is free.</p>
+
+  <section>
+    <div class="row">
+      <h2>🧭 Discovered niches</h2>
+      <button id="loadDiscovery" type="button" class="plain">Show ranking</button>
+    </div>
+    <div id="discovery"></div>
+  </section>
 
   <div id="status" class="status hidden"></div>
   <div id="results"></div>
@@ -307,6 +323,51 @@
     ));
     run();
   }
+
+  // ---------- Discovered niches ----------
+  document.getElementById("loadDiscovery").addEventListener("click", async () => {
+    const box = document.getElementById("discovery");
+    box.replaceChildren(el("p", { class: "meta", textContent: "Loading…" }));
+    try {
+      const res = await fetch("/api/discovery");
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error);
+      const n = (v) => (v === null ? "—" : v);
+      const table = el("table", {},
+        el("tr", {}, ...["#", "Niche", "Fit", "Demand", "Competition", "Opportunity", "Freshness", "Confidence", "Best proof"].map((h) => el("th", { textContent: h }))),
+      );
+      d.rows.forEach((r, i) => {
+        const proof = r.bestOutlier
+          ? el("a", { href: r.bestOutlier.url, target: "_blank", rel: "noopener", textContent: `${r.bestOutlier.ratio}× · ${r.bestOutlier.title}` })
+          : "—";
+        const row = el("tr", { class: "click", title: "Click to open the full analysis" },
+          el("td", { class: "n", textContent: i + 1 }),
+          el("td", {}, el("strong", { textContent: r.query }), el("div", { class: "meta", textContent: r.group })),
+          el("td", { class: "n", textContent: r.fit === null ? "not scored" : r.fit }),
+          el("td", { class: "n", textContent: n(r.demand) }),
+          el("td", { class: "n", textContent: n(r.competition) }),
+          el("td", { class: "n", textContent: n(r.opportunity) }),
+          el("td", { class: "n", textContent: n(r.freshness) }),
+          el("td", { textContent: `${r.confidence} (${r.sampleSize})` }),
+          el("td", {}, proof),
+        );
+        row.addEventListener("click", (e) => {
+          if (e.target.tagName === "A") return; // clicking the proof link just opens YouTube
+          document.getElementById("q").value = r.query;
+          document.getElementById("lang").value = "en";
+          document.getElementById("format").value = "long";
+          document.getElementById("search").requestSubmit();
+        });
+        table.append(row);
+      });
+      box.replaceChildren(
+        el("p", { class: "meta", textContent: `Last run ${new Date(d.ranAt).toLocaleString()} · ${d.checked} niches checked · ${d.notCheckedYet.length} not checked yet. Fit = average of Demand, Opportunity, Freshness and (100 − Competition): a sorting aid, not a prediction. Money is not included (no real ad-rate data yet).` }),
+        el("div", { class: "card tablewrap" }, table),
+      );
+    } catch (err) {
+      box.replaceChildren(el("p", { class: "status error", textContent: "❌ " + err.message }));
+    }
+  });
 
   document.getElementById("search").addEventListener("submit", async (e) => {
     e.preventDefault();

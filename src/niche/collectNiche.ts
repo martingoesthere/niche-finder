@@ -1,4 +1,4 @@
-import { cached } from "../cache/fileCache.js";
+import { cached, hasCache } from "../cache/fileCache.js";
 import { filterRelevant, type RemovedVideo } from "./relevance.js";
 import { filterAudience, TARGET_COUNTRIES } from "./audience.js";
 import { filterContentType, type VideoFormat } from "./contentType.js";
@@ -57,7 +57,9 @@ export type CollectOptions = {
   language?: "en" | "es";
   region?: string; // default "US"
   targetCountries?: string[]; // default depends on language
-  maxPages?: number; // default 3
+  maxPages?: number; // default 5
+  maxAgeHours?: number; // reuse saved data this long (default 24)
+  cacheOnly?: boolean; // true = never call YouTube; throws NotCachedError if nothing is saved
   format?: VideoFormat; // "long" (default), "short" or "all"
 };
 
@@ -99,6 +101,14 @@ function applyFilters(
   };
 }
 
+// Thrown when cacheOnly is set and this niche has no saved data yet
+export class NotCachedError extends Error {
+  constructor(query: string) {
+    super(`No saved data yet for "${query}"`);
+    this.name = "NotCachedError";
+  }
+}
+
 export async function collectNiche(
   query: string,
   options: CollectOptions = {},
@@ -112,8 +122,12 @@ export async function collectNiche(
   const cleanQuery = query.trim().toLowerCase();
   const key = `niche:v8:${language}:${region}:${months}m:p${maxPages}:${format}:${targetCountries.join("-")}:${cleanQuery}`;
 
+  if (options.cacheOnly && !(await hasCache(key, options.maxAgeHours ?? 24))) {
+    throw new NotCachedError(cleanQuery);
+  }
+
   // 1. Get raw data page by page (from cache if saved in the last 24 hours)
-  const raw = await cached<RawNicheData>(key, 24, async () => {
+  const raw = await cached<RawNicheData>(key, options.maxAgeHours ?? 24, async () => {
     const publishedAfter = new Date();
     publishedAfter.setMonth(publishedAfter.getMonth() - months);
 

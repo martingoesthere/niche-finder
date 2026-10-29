@@ -3,6 +3,7 @@ import { collectNiche } from "./niche/collectNiche.js";
 import { scoreNiche, type Score } from "./niche/scoreNiche.js";
 import { findTopics, type VideoSignal } from "./topics/findTopics.js";
 import { YouTubeApiError } from "./youtube/youtubeApi.js";
+import { readLatestDiscovery } from "./discover/discover.js";
 
 const PORT = Number(process.env.PORT ?? 3000);
 const app = express();
@@ -94,6 +95,16 @@ app.get("/api/analyze", async (req: Request, res: Response) => {
     console.error(err);
     res.status(500).json({ error: err instanceof Error ? err.message : "Something went wrong." });
   }
+});
+
+// Latest discovery ranking (made by "npm run discover"; reading it costs nothing)
+app.get("/api/discovery", async (_req: Request, res: Response) => {
+  const report = await readLatestDiscovery();
+  if (!report) {
+    res.status(404).json({ error: 'No discovered niches yet. In the terminal, run: npm run discover' });
+    return;
+  }
+  res.json(report);
 });
 
 // Only reachable from your own computer

@@ -10,6 +10,7 @@
     "niche-test": "tsx src/scripts/nicheTest.ts",
     "score-test": "tsx src/scripts/scoreTest.ts",
     "topic-test": "tsx src/scripts/topicTest.ts",
+    "discover": "tsx src/scripts/discover.ts",
     "build": "tsc",
     "start": "node dist/server.js"
   },

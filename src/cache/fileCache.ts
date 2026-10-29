@@ -42,6 +42,11 @@ async function writeCache<T>(key: string, data: T): Promise<CacheEntry<T>> {
   return entry;
 }
 
+// True if a fresh saved copy exists (reads no YouTube data, costs nothing)
+export async function hasCache(key: string, maxAgeHours: number): Promise<boolean> {
+  return (await readCache(key, maxAgeHours)) !== null;
+}
+
 /**
  * Use the saved copy if it's fresh enough.
  * Otherwise run `fetcher` (which calls YouTube), save the answer, and return it.
