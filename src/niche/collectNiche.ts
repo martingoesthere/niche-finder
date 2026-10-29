@@ -110,7 +110,7 @@ export async function collectNiche(
   const maxPages = options.maxPages ?? DEFAULT_MAX_PAGES;
   const format = options.format ?? "long";
   const cleanQuery = query.trim().toLowerCase();
-  const key = `niche:v7:${language}:${region}:${months}m:p${maxPages}:${format}:${targetCountries.join("-")}:${cleanQuery}`;
+  const key = `niche:v8:${language}:${region}:${months}m:p${maxPages}:${format}:${targetCountries.join("-")}:${cleanQuery}`;
 
   // 1. Get raw data page by page (from cache if saved in the last 24 hours)
   const raw = await cached<RawNicheData>(key, 24, async () => {

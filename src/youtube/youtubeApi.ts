@@ -15,6 +15,7 @@ export type VideoInfo = {
   comments: number | null;
   durationSeconds: number;
   categoryId: string | null; // YouTube's category, e.g. "27" = Education, "23" = Comedy
+  madeForKids: boolean | null; // YouTube's "made for kids" flag
   audioLanguage: string | null; // spoken language, if the creator set it (e.g. "en", "hi")
   textLanguage: string | null; // title/description language, if set
   url: string;
@@ -205,6 +206,7 @@ type RawVideosResponse = {
       commentCount?: string;
     };
     contentDetails: { duration?: string };
+    status?: { madeForKids?: boolean };
   }>;
 };
 
@@ -213,7 +215,7 @@ export async function getVideos(videoIds: string[]): Promise<VideoInfo[]> {
 
   for (const group of chunk(videoIds, 50)) {
     const data = await callYouTube<RawVideosResponse>("videos", {
-      part: "snippet,statistics,contentDetails",
+      part: "snippet,statistics,contentDetails,status", // same 1-unit cost
       id: group.join(","),
       maxResults: "50",
     });
@@ -230,6 +232,7 @@ export async function getVideos(videoIds: string[]): Promise<VideoInfo[]> {
         comments: toNumber(v.statistics.commentCount),
         durationSeconds: parseDuration(v.contentDetails.duration),
         categoryId: v.snippet.categoryId ?? null,
+        madeForKids: v.status?.madeForKids ?? null,
         audioLanguage: v.snippet.defaultAudioLanguage ?? null,
         textLanguage: v.snippet.defaultLanguage ?? null,
         url: `https://www.youtube.com/watch?v=${v.id}`,

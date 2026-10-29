@@ -90,7 +90,7 @@ try {
   console.log(`Removed (wrong language):  ${removedLanguage}`);
   console.log(`  (of which no country set: ${result.unknownCountryVideos})`);
   console.log(`Removed (format: ${result.format === "long" ? "Shorts" : "long videos"}):  ${removedFormat}`);
-  console.log(`Removed (music/gaming/comedy): ${removedCategory}`);
+  console.log(`Removed (not explainers):  ${removedCategory}`);
   console.log("");
   console.log(
     `EXACT match (micro-niche): ${result.exactVideos.length} videos | median ${fmtMedian(result.exactVideos.map((v) => v.views))} views | ${dataLabel(result.exactVideos.length)}`,

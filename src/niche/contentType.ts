@@ -18,6 +18,24 @@ export const BLOCKED_CATEGORIES: Record<string, string> = {
   "23": "Comedy",
 };
 
+// Title words that mean "this is not an explainer" (found while testing "medieval")
+export const NON_EXPLAINER_WORDS = [
+  "music", "song", "songs", "lullaby", "for kids", "nursery", "full movie", "trailer", "challenge",
+  "gameplay", "playthrough", "minecraft", "soundtrack", "ambience", "ambient", "playlist", "dance",
+];
+
+function normalizeTitle(text: string): string {
+  return text.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
+
+function nonExplainerWord(title: string): string | null {
+  const t = normalizeTitle(title);
+  for (const word of NON_EXPLAINER_WORDS) {
+    if (new RegExp(`(^|[^a-z0-9])${word}([^a-z0-9]|$)`).test(t)) return word;
+  }
+  return null;
+}
+
 export type ContentTypeResult = {
   kept: VideoInfo[];
   removed: RemovedVideo[];
@@ -53,7 +71,20 @@ export function filterContentType(videos: VideoInfo[], format: VideoFormat): Con
       continue;
     }
 
-    // 2. YouTube's own category says it's entertainment, not an explainer
+    // 2. YouTube says it's made for kids
+    if (video.madeForKids === true) {
+      removed.push({ video, filter: "category", reason: 'YouTube marks it "made for kids"' });
+      continue;
+    }
+
+    // 3. The title says it's music, a movie, a challenge, gameplay...
+    const word = nonExplainerWord(video.title);
+    if (word) {
+      removed.push({ video, filter: "category", reason: `title says "${word}" (not an explainer)` });
+      continue;
+    }
+
+    // 4. YouTube's own category says it's not an explainer
     const category = video.categoryId ? BLOCKED_CATEGORIES[video.categoryId] : undefined;
     if (category) {
       removed.push({
