@@ -65,7 +65,7 @@ const STOP_WORDS = new Set([
 
 export type RemovedVideo = {
   video: VideoInfo;
-  filter: "topic" | "country" | "language";
+  filter: "topic" | "country" | "language" | "format" | "category";
   reason: string;
 };
 

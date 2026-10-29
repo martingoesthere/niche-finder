@@ -14,6 +14,7 @@ export type VideoInfo = {
   likes: number | null; // null = hidden by creator
   comments: number | null;
   durationSeconds: number;
+  categoryId: string | null; // YouTube's category, e.g. "27" = Education, "23" = Comedy
   audioLanguage: string | null; // spoken language, if the creator set it (e.g. "en", "hi")
   textLanguage: string | null; // title/description language, if set
   url: string;
@@ -194,6 +195,7 @@ type RawVideosResponse = {
       channelId: string;
       channelTitle: string;
       publishedAt: string;
+      categoryId?: string;
       defaultAudioLanguage?: string;
       defaultLanguage?: string;
     };
@@ -227,6 +229,7 @@ export async function getVideos(videoIds: string[]): Promise<VideoInfo[]> {
         likes: toNumber(v.statistics.likeCount),
         comments: toNumber(v.statistics.commentCount),
         durationSeconds: parseDuration(v.contentDetails.duration),
+        categoryId: v.snippet.categoryId ?? null,
         audioLanguage: v.snippet.defaultAudioLanguage ?? null,
         textLanguage: v.snippet.defaultLanguage ?? null,
         url: `https://www.youtube.com/watch?v=${v.id}`,

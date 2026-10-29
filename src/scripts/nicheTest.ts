@@ -57,6 +57,12 @@ try {
   const removedLanguage = result.removed.filter(
     (r) => r.filter === "language",
   ).length;
+  const removedFormat = result.removed.filter(
+    (r) => r.filter === "format",
+  ).length;
+  const removedCategory = result.removed.filter(
+    (r) => r.filter === "category",
+  ).length;
 
   console.log(
     `🔎 Niche: "${result.query}" | region ${result.region} | last ${result.months} months`,
@@ -82,7 +88,9 @@ try {
   console.log(`Removed (off-topic):       ${removedTopic}`);
   console.log(`Removed (wrong country):   ${removedCountry}`);
   console.log(`Removed (wrong language):  ${removedLanguage}`);
-  console.log(`Kept, country unknown:     ${result.unknownCountryVideos}`);
+  console.log(`  (of which no country set: ${result.unknownCountryVideos})`);
+  console.log(`Removed (format: ${result.format === "long" ? "Shorts" : "long videos"}):  ${removedFormat}`);
+  console.log(`Removed (entertainment):   ${removedCategory}`);
   console.log("");
   console.log(
     `EXACT match (micro-niche): ${result.exactVideos.length} videos | median ${fmtMedian(result.exactVideos.map((v) => v.views))} views | ${dataLabel(result.exactVideos.length)}`,
@@ -103,7 +111,7 @@ try {
   printVideos(result.broadVideos, 5);
 
   // Show language removals first, so we can check the new filter
-  const order = { language: 0, topic: 1, country: 2 } as const;
+  const order = { category: 0, format: 1, language: 2, topic: 3, country: 4 } as const;
   const removedSorted = [...result.removed].sort(
     (a, b) => order[a.filter] - order[b.filter],
   );

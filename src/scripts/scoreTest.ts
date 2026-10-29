@@ -31,7 +31,11 @@ try {
       ? `📦 From cache (saved ${result.savedAt}). 0 units used.`
       : `🌐 Fresh from YouTube. About ${result.unitsUsed} units used.`,
   );
-  console.log(`Sample: ${scores.sampleSize} verified videos | Confidence: ${scores.confidence.toUpperCase()}\n`);
+  const count = (filter: string) => result.removed.filter((r) => r.filter === filter).length;
+  console.log(
+    `Removed: ${count("topic")} off-topic | ${count("country")} wrong/unknown country | ${count("language")} wrong language | ${count("format")} Shorts | ${count("category")} entertainment`,
+  );
+  console.log(`Sample: ${scores.sampleSize} verified long videos | Confidence: ${scores.confidence.toUpperCase()}\n`);
 
   console.log("Views over time (median):");
   scores.windows.forEach((w) =>

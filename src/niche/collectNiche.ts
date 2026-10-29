@@ -1,6 +1,7 @@
 import { cached } from "../cache/fileCache.js";
 import { filterRelevant, type RemovedVideo } from "./relevance.js";
 import { filterAudience, TARGET_COUNTRIES } from "./audience.js";
+import { filterContentType, type VideoFormat } from "./contentType.js";
 import {
   getChannels,
   getVideos,
@@ -35,6 +36,7 @@ export type NicheResult = {
   region: string;
   months: number;
   targetCountries: string[];
+  format: VideoFormat;
   fromCache: boolean;
   savedAt: string;
   unitsUsed: number;
@@ -45,7 +47,7 @@ export type NicheResult = {
   exactVideos: VideoInfo[]; // the micro-niche itself
   broadVideos: VideoInfo[]; // the parent topic
   videos: VideoInfo[]; // exact + broad
-  removed: RemovedVideo[]; // off-topic, wrong country or wrong language, with the reason
+  removed: RemovedVideo[]; // every removed video, with the filter and the reason
   unknownCountryVideos: number;
   channels: ChannelInfo[]; // channels of the kept videos
 };
@@ -56,6 +58,7 @@ export type CollectOptions = {
   region?: string; // default "US"
   targetCountries?: string[]; // default depends on language
   maxPages?: number; // default 3
+  format?: VideoFormat; // "long" (default), "short" or "all"
 };
 
 // Runs all filters. Used while fetching (to decide when to stop) and at the end.
@@ -65,6 +68,7 @@ function applyFilters(
   query: string,
   targetCountries: string[],
   language: "en" | "es",
+  format: VideoFormat,
 ) {
   const relevance = filterRelevant(videos, query);
   const channelById = new Map<string, ChannelInfo>(
@@ -82,11 +86,15 @@ function applyFilters(
     targetCountries,
     language,
   );
+  const exactType = filterContentType(exact.kept, format);
+  const broadType = filterContentType(broad.kept, format);
   return {
     relevance,
     exact,
     broad,
-    keptCount: exact.kept.length + broad.kept.length,
+    exactType,
+    broadType,
+    keptCount: exactType.kept.length + broadType.kept.length,
   };
 }
 
@@ -99,8 +107,9 @@ export async function collectNiche(
   const region = (options.region ?? "US").toUpperCase();
   const targetCountries = options.targetCountries ?? TARGET_COUNTRIES[language];
   const maxPages = options.maxPages ?? DEFAULT_MAX_PAGES;
+  const format = options.format ?? "long";
   const cleanQuery = query.trim().toLowerCase();
-  const key = `niche:v4:${language}:${region}:${months}m:p${maxPages}:${targetCountries.join("-")}:${cleanQuery}`;
+  const key = `niche:v5:${language}:${region}:${months}m:p${maxPages}:${format}:${targetCountries.join("-")}:${cleanQuery}`;
 
   // 1. Get raw data page by page (from cache if saved in the last 24 hours)
   const raw = await cached<RawNicheData>(key, 24, async () => {
@@ -156,6 +165,7 @@ export async function collectNiche(
         cleanQuery,
         targetCountries,
         language,
+        format,
       );
       if (keptCount >= MIN_VIDEOS) {
         stoppedBecause = `reached ${MIN_VIDEOS}+ kept videos`;
@@ -183,15 +193,16 @@ export async function collectNiche(
   });
 
   // 2. Run the filters on the full raw data (free)
-  const { relevance, exact, broad } = applyFilters(
+  const { relevance, exact, broad, exactType, broadType } = applyFilters(
     raw.data.videos,
     raw.data.channels,
     cleanQuery,
     targetCountries,
     language,
+    format,
   );
 
-  const videos = [...exact.kept, ...broad.kept];
+  const videos = [...exactType.kept, ...broadType.kept];
   const keptChannelIds = new Set(videos.map((v) => v.channelId));
 
   return {
@@ -200,6 +211,7 @@ export async function collectNiche(
     region,
     months,
     targetCountries,
+    format,
     fromCache: raw.fromCache,
     savedAt: raw.savedAt,
     unitsUsed: raw.fromCache ? 0 : raw.data.unitsUsed,
@@ -207,10 +219,16 @@ export async function collectNiche(
     stoppedBecause: raw.data.stoppedBecause,
     keywords: relevance.keywords,
     totalFound: raw.data.videos.length,
-    exactVideos: exact.kept,
-    broadVideos: broad.kept,
+    exactVideos: exactType.kept,
+    broadVideos: broadType.kept,
     videos,
-    removed: [...relevance.removed, ...exact.removed, ...broad.removed],
+    removed: [
+      ...relevance.removed,
+      ...exact.removed,
+      ...broad.removed,
+      ...exactType.removed,
+      ...broadType.removed,
+    ],
     unknownCountryVideos: exact.unknownCountry + broad.unknownCountry,
     channels: raw.data.channels.filter((c) => keptChannelIds.has(c.id)),
   };
