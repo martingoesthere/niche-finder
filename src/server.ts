@@ -1,42 +1,18 @@
 import express, { type Request, type Response } from "express";
 import { collectNiche } from "./niche/collectNiche.js";
-import { scoreNiche, type Score } from "./niche/scoreNiche.js";
-import { findTopics, type VideoSignal } from "./topics/findTopics.js";
 import { YouTubeApiError } from "./youtube/youtubeApi.js";
 import { checkNodes, collectOptionsFor, maxUnitsFor, readRows } from "./discover/discover.js";
 import { NICHE_TREE, findNode } from "./discover/nicheTree.js";
 import { CHARACTERISTICS } from "./discover/characteristics.js";
+import { addUnits } from "./quota.js";
+import { analysisFor } from "./analysis.js";
+import { buildReport } from "./discover/report.js";
 
 const PORT = Number(process.env.PORT ?? 3000);
 const app = express();
 
 // The search page lives in the "public" folder
 app.use(express.static("public"));
-
-// Smaller video shape for the page (only what it shows and filters on)
-function videoForPage(s: VideoSignal) {
-  return {
-    title: s.video.title,
-    url: s.video.url,
-    views: s.video.views,
-    publishedAt: s.video.publishedAt,
-    durationSeconds: s.video.durationSeconds,
-    language: s.video.audioLanguage ?? s.video.textLanguage,
-    channelTitle: s.video.channelTitle,
-    channelUrl: s.channel?.url ?? null,
-    country: s.channel?.country ?? null,
-    channelCreatedAt: s.channel?.createdAt ?? null,
-    channelVideoCount: s.channel?.videoCount ?? null,
-    // views vs the channel's own average, for every channel (giants included), used by the Explorer
-    ratioVsChannel:
-      s.channelAvgViews && s.channelAvgViews > 0 ? Number((s.video.views / s.channelAvgViews).toFixed(1)) : null,
-    subscribers: s.channel?.subscribers ?? null,
-    viewsPerDay: Math.round(s.viewsPerDay),
-    ageDays: Math.round(s.ageDays),
-    outlierRatio: s.outlierRatio === null ? null : Number(s.outlierRatio.toFixed(1)),
-    channelAvgViews: s.channelAvgViews === null ? null : Math.round(s.channelAvgViews),
-  };
-}
 
 // One request does everything: collect (or read from cache), score, find topics
 // ?node=<tree id> uses the same saved data as the niche tree; ?q=<topic> is a free-typed search
@@ -60,43 +36,8 @@ app.get("/api/analyze", async (req: Request, res: Response) => {
       query,
       node ? collectOptionsFor(node) : { language, format, region: language === "es" ? "MX" : "US" },
     );
-    const scores = scoreNiche(result.exactVideos, result.channels);
-    const topics = findTopics(result);
-
-    const removed: Record<string, number> = {};
-    for (const r of result.removed) removed[r.filter] = (removed[r.filter] ?? 0) + 1;
-
-    const scoreList: Score[] = [scores.demand, scores.competition, scores.opportunity, scores.freshness, scores.money];
-
-    res.json({
-      query: result.query,
-      language: result.language,
-      targetCountries: result.targetCountries,
-      fromCache: result.fromCache,
-      savedAt: result.savedAt,
-      unitsUsed: result.unitsUsed,
-      pagesFetched: result.pagesFetched,
-      totalFound: result.totalFound,
-      removed,
-      sampleSize: scores.sampleSize,
-      confidence: scores.confidence,
-      windows: scores.windows,
-      scores: scoreList,
-      topics: topics.topics.slice(0, 10).map((t) => ({
-        phrase: t.phrase,
-        tags: t.tags,
-        videoCount: t.videos.length,
-        channelCount: t.channelCount,
-        medianViews: Math.round(t.medianViews),
-        medianViewsPerDay: Math.round(t.medianViewsPerDay),
-        recentVideos: t.recentVideos,
-        proof: t.videos.slice(0, 3).map(videoForPage),
-      })),
-      format: result.format,
-      videos: topics.all.map(videoForPage),
-      outliers: topics.outliers.slice(0, 5).map(videoForPage),
-      momentum: topics.momentum.slice(0, 5).map(videoForPage),
-    });
+    await addUnits(result.unitsUsed);
+    res.json(analysisFor(result));
   } catch (err: unknown) {
     if (err instanceof YouTubeApiError) {
       const status = err.reason === "quotaExceeded" || err.reason === "dailyLimitExceeded" ? 429 : 502;
@@ -108,7 +49,6 @@ app.get("/api/analyze", async (req: Request, res: Response) => {
   }
 });
 
-// Latest discovery ranking (made by "npm run discover"; reading it costs nothing)
 // ---------- Niche tree (no typing needed) ----------
 
 // Free: the rows under a parent (or the 10 niches), using saved data only
@@ -148,9 +88,26 @@ app.get("/api/tree/check", async (req: Request, res: Response) => {
   checking = true;
   try {
     const report = await checkNodes(nodes, budget, (line) => console.log("   " + line));
+    await addUnits(report.unitsUsed);
     res.json(report);
   } finally {
     checking = false;
+  }
+});
+
+// ---------- Automatic report (no input at all) ----------
+// Checks the 10 niches, then the best niche's sub-niches, then the best sub-niche's
+// micro-niches, and returns everything plus video ideas for the best one.
+// Never auto-spends more than DAILY_AUTO_CAP units per day; saved data is reused for 7 days.
+
+let reportInFlight: ReturnType<typeof buildReport> | null = null; // reloads share one run, never spend twice
+app.get("/api/report", async (_req: Request, res: Response) => {
+  try {
+    reportInFlight ??= buildReport().finally(() => (reportInFlight = null));
+    res.json(await reportInFlight);
+  } catch (err: unknown) {
+    console.error(err);
+    res.status(500).json({ error: err instanceof Error ? err.message : "Something went wrong." });
   }
 });
 

@@ -134,7 +134,7 @@
 <body>
 <main>
   <h1>Niche Finder</h1>
-  <p class="lead">Pick a niche, go deeper, and get video ideas. Every number comes from real YouTube videos in the US, UK, Canada and Australia, and you can open each video to check it.</p>
+  <p class="lead">The best niches and video ideas, found automatically. Every number comes from real YouTube videos in the US, UK, Canada and Australia, and you can open each video to check it.</p>
 
   <nav class="trail" id="trail" aria-label="Where you are"></nav>
   <div id="view"></div>
@@ -248,7 +248,9 @@
       if (i === crumbs.length) return { title, cls: "now", text: "you are here" };
       return { title, cls: "", text: "" };
     });
-    document.getElementById("trail").replaceChildren(...states.map((s, i) => {
+    const home = el("button", { type: "button", class: "btn link", style: "grid-column:1 / -1; justify-self:start", textContent: "Back to today's report" });
+    home.addEventListener("click", showReport);
+    document.getElementById("trail").replaceChildren(home, ...states.map((s, i) => {
       const b = el("button", { type: "button", class: "step " + s.cls, disabled: s.cls !== "done" },
         el("b", { textContent: s.title }), el("span", { textContent: s.text }));
       if (s.cls === "done") b.addEventListener("click", () => { ideasFor = null; crumbs = crumbs.slice(0, i); showList(); });
@@ -423,6 +425,7 @@
 
   async function showList(message) {
     ideasFor = null;
+    inReport = false;
     renderTrail();
     view.replaceChildren(el("p", { class: "muted", textContent: "Loading…" }));
     const parent = crumbs[crumbs.length - 1];
@@ -482,25 +485,13 @@
       el("div", { class: "m", textContent: `${num(v.views)} views · ${subs(v.subscribers)} subscribers · ${v.channelTitle}${note ? " · " + note : ""}` }));
   }
 
-  async function showIdeas(target) {
-    ideasFor = target;
-    renderTrail();
-    view.replaceChildren(el("p", { class: "muted", textContent: `Loading video ideas for “${target.label}”…` }));
-    window.scrollTo({ top: 0 });
-    try {
-      const url = target.id
-        ? `/api/analyze?node=${encodeURIComponent(target.id)}`
-        : `/api/analyze?q=${encodeURIComponent(target.q)}&lang=${target.lang}&format=${target.format}`;
-      const d = await getJSON(url);
-
-      const back = el("button", { type: "button", class: "btn quiet", textContent: "Back to the list" });
-      back.addEventListener("click", () => { ideasFor = null; showList(); });
-
+  // Video ideas, outliers, fast-growing videos (and, when full, scores + explorer) for one analysis
+  function ideasSections(d, { full = false, maxIdeas = 10 } = {}) {
       const ideas = el("section", { class: "block" },
         el("h2", { textContent: "Video ideas" }),
         el("p", { class: "lead", textContent: "Phrases that appear in the titles of successful videos from 2 or more different channels. The tags say why each one stands out." }));
       if (!d.topics.length) ideas.append(el("div", { class: "panel muted", textContent: "No phrase worked for 2 or more channels yet. Try a broader niche." }));
-      d.topics.forEach((t, i) => {
+      d.topics.slice(0, maxIdeas).forEach((t, i) => {
         const proof = el("ul", { class: "vids" });
         t.proof.forEach((v) => proof.append(videoItem(v, `${num(v.viewsPerDay)} views per day`)));
         ideas.append(el("div", { class: "idea" },
@@ -538,22 +529,100 @@
       const explorer = el("details", { class: "more" }, el("summary", { textContent: `Explore all ${d.videos.length} videos with filters` }));
       explorer.addEventListener("toggle", () => { if (explorer.open && explorer.childElementCount === 1) renderExplorer(d.videos, explorer); });
 
+      const sections = [ideas,
+        el("section", { class: "block" }, el("h2", { textContent: "Videos that beat their own channel" }),
+          el("p", { class: "lead", textContent: "Channels under 1M subscribers whose video got 3× or more their usual views. Study these first." }),
+          el("div", { class: "panel" }, d.outliers.length ? outliers : el("p", { class: "muted", textContent: "None in this data." }))),
+        el("section", { class: "block" }, el("h2", { textContent: "Fast-growing new videos" }),
+          el("p", { class: "lead", textContent: "Published in the last 90 days, sorted by views per day." }),
+          el("div", { class: "panel" }, d.momentum.length ? momentum : el("p", { class: "muted", textContent: "None in this data." })))];
+      if (full) sections.push(
+        el("section", { class: "block" }, el("h2", { textContent: "Scores for this topic" }),
+          el("p", { class: "lead", textContent: "The same four scores, with the proof videos behind each one." }), scoreList),
+        explorer);
+      return sections;
+  }
+
+  async function showIdeas(target) {
+    ideasFor = target;
+    inReport = false;
+    renderTrail();
+    view.replaceChildren(el("p", { class: "muted", textContent: `Loading video ideas for “${target.label}”…` }));
+    window.scrollTo({ top: 0 });
+    try {
+      const url = target.id
+        ? `/api/analyze?node=${encodeURIComponent(target.id)}`
+        : `/api/analyze?q=${encodeURIComponent(target.q)}&lang=${target.lang}&format=${target.format}`;
+      const d = await getJSON(url);
+
+      const back = el("button", { type: "button", class: "btn quiet", textContent: "Back to the list" });
+      back.addEventListener("click", () => { ideasFor = null; showList(); });
+      const removed = Object.entries(d.removed).map(([k, n]) => `${n} ${REMOVED[k] ?? k}`).join(", ") || "none";
+
       view.replaceChildren(
         el("div", { class: "bar-row" },
           el("div", {}, el("h2", { textContent: `“${d.query}”` }),
             el("p", { class: "muted small", textContent: `${d.sampleSize} verified videos used of ${d.totalFound} found · ${d.confidence} confidence · ${d.fromCache ? "saved data, 0 units used" : `about ${num(d.unitsUsed)} units used`}` }),
             el("p", { class: "muted small", textContent: `Removed before scoring: ${removed}.` })),
           back),
-        ideas,
-        el("section", { class: "block" }, el("h2", { textContent: "Videos that beat their own channel" }),
-          el("p", { class: "lead", textContent: "Channels under 1M subscribers whose video got 3× or more their usual views. Study these first." }),
-          el("div", { class: "panel" }, d.outliers.length ? outliers : el("p", { class: "muted", textContent: "None in this data." }))),
-        el("section", { class: "block" }, el("h2", { textContent: "Fast-growing new videos" }),
-          el("p", { class: "lead", textContent: "Published in the last 90 days, sorted by views per day." }),
-          el("div", { class: "panel" }, d.momentum.length ? momentum : el("p", { class: "muted", textContent: "None in this data." }))),
-        el("section", { class: "block" }, el("h2", { textContent: "Scores for this topic" }),
-          el("p", { class: "lead", textContent: "The same four scores, with the proof videos behind each one." }), scoreList),
-        explorer,
+        ...ideasSections(d, { full: true }),
+      );
+    } catch (err) {
+      view.replaceChildren(el("div", { class: "notice error", textContent: err.message }));
+    }
+  }
+
+  // ---------- Today's report (opens automatically, no input) ----------
+  let inReport = false;
+
+  function pathCard(rep) {
+    const levels = [["Niche", rep.path.niche], ["Sub-niche", rep.path.sub], ["Micro-niche", rep.path.micro]].filter(([, r]) => r);
+    const target = rep.path.micro ?? rep.path.sub ?? rep.path.niche;
+    return el("div", { class: "panel" },
+      el("h2", { textContent: "Today's best pick" }),
+      el("p", { class: "lead", textContent: "The app checked every niche with real YouTube data, then went deeper into the one with the best Fit, twice." }),
+      el("div", { class: "trail", style: "margin:16px 0 12px" }, ...levels.map(([label, r]) =>
+        el("div", { class: "step done" }, el("b", { textContent: label }), el("span", { textContent: `${r.query} · Fit ${r.fit ?? "—"}` })))),
+      target.metrics ? el("p", { textContent: summarySentence(target) }) : null,
+      target.checked ? el("div", { class: "meters", style: "grid-column:auto" },
+        meter("Demand", target.demand), meter("Competition", target.competition, true), meter("Opportunity", target.opportunity), meter("Freshness", target.freshness)) : null,
+    );
+  }
+
+  function rankSection(title, lead, rows) {
+    if (!rows.length) return null;
+    const sorted = [...rows].sort((a, b) => (Number(b.checked) - Number(a.checked)) || ((b.fit ?? -1) - (a.fit ?? -1)));
+    return el("section", { class: "block" }, el("h2", { textContent: title }), el("p", { class: "lead", textContent: lead }), ...sorted.map(nicheRow));
+  }
+
+  async function showReport() {
+    inReport = true;
+    ideasFor = null;
+    crumbs = [];
+    document.getElementById("trail").replaceChildren();
+    view.replaceChildren(el("div", { class: "notice" },
+      el("p", {}, el("b", { textContent: "Collecting real YouTube data…" })),
+      el("p", { class: "small", textContent: "The first time takes 2 to 3 minutes. After that it opens instantly for 7 days, at no cost." })));
+    try {
+      const rep = await getJSON("/api/report");
+      if (!rep.path.niche) {
+        view.replaceChildren(el("div", { class: "notice" },
+          el("p", { textContent: "No data yet today. " + (rep.notes.join(" ") || "") }),
+          el("p", { class: "small muted", textContent: `YouTube units used today: ${num(rep.unitsUsedToday)} of ${num(rep.dailyLimit)}.` })));
+        return;
+      }
+      const target = rep.path.micro ?? rep.path.sub ?? rep.path.niche;
+      view.replaceChildren(
+        el("p", { class: "muted small", style: "margin-bottom:12px", textContent: `Updated ${new Date(rep.builtAt).toLocaleString()}. YouTube units used today: ${num(rep.unitsUsedToday)} of ${num(rep.dailyLimit)} (automatic checks stop at ${num(rep.dailyAutoCap)}).` }),
+        ...rep.notes.map((n) => el("div", { class: "notice", textContent: n })),
+        pathCard(rep),
+        ...(rep.ideas ? ideasSections(rep.ideas, { maxIdeas: 5 }).map((sec, i) => {
+          if (i === 0) sec.children[0].textContent = `Video ideas for “${target.query}”`;
+          return sec;
+        }) : []),
+        rankSection(`Micro-niches inside “${rep.path.sub?.query ?? ""}”`, "Ranked by Fit. Open “Show all numbers” on any of them for the details.", rep.micros),
+        rankSection(`Sub-niches inside “${rep.path.niche.query}”`, "Ranked by Fit.", rep.subs),
+        rankSection("All 10 niches", "Ranked by Fit. You can open any of them to explore it yourself.", rep.niches),
       );
     } catch (err) {
       view.replaceChildren(el("div", { class: "notice error", textContent: err.message }));
@@ -669,7 +738,7 @@
     showIdeas({ q, label: q, depth: -1, lang: document.getElementById("lang").value, format: document.getElementById("format").value });
   });
 
-  showList();
+  showReport();
 </script>
 </body>
 </html>
