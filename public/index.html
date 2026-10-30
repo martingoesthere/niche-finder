@@ -575,24 +575,55 @@
   // ---------- Today's report (opens automatically, no input) ----------
   let inReport = false;
 
-  function pathCard(rep) {
-    const levels = [["Niche", rep.path.niche], ["Sub-niche", rep.path.sub], ["Micro-niche", rep.path.micro]].filter(([, r]) => r);
-    const target = rep.path.micro ?? rep.path.sub ?? rep.path.niche;
-    return el("div", { class: "panel" },
-      el("h2", { textContent: "Today's best pick" }),
-      el("p", { class: "lead", textContent: "The app checked every niche with real YouTube data, then went deeper into the one with the best Fit, twice." }),
-      el("div", { class: "trail", style: "margin:16px 0 12px" }, ...levels.map(([label, r]) =>
-        el("div", { class: "step done" }, el("b", { textContent: label }), el("span", { textContent: `${r.query} · Fit ${r.fit ?? "—"}` })))),
-      target.metrics ? el("p", { textContent: summarySentence(target) }) : null,
-      target.checked ? el("div", { class: "meters", style: "grid-column:auto" },
-        meter("Demand", target.demand), meter("Competition", target.competition, true), meter("Opportunity", target.opportunity), meter("Freshness", target.freshness)) : null,
+  function pickCard(p) {
+    const f = p.focus;
+    const path = [p.niche, p.bestSub, p.bestMicro].filter(Boolean);
+    const card = el("article", { class: "nrow" });
+    card.append(
+      el("div", { class: "rank", textContent: p.rank }),
+      el("div", {},
+        el("h3", { class: "name", textContent: path.map((r) => r.query).join(" › ") }),
+        el("div", { class: "muted small", textContent: `${p.niche.group} · scores shown for “${f.query}” (${LEVEL[f.level]})` }),
+        f.metrics ? el("p", { class: "summary", textContent: summarySentence(f) }) : null,
+      ),
+      el("div", { class: "fitbox" }, el("div", { class: "fitnum", textContent: f.fit ?? "—" }),
+        el("div", { class: "tiny muted", textContent: f.fit === null ? `not enough videos (${f.sampleSize} of 30)` : `Fit · ${f.confidence} confidence` })),
     );
-  }
+    if (f.checked) card.append(el("div", { class: "meters" },
+      meter("Demand", f.demand), meter("Competition", f.competition, true), meter("Opportunity", f.opportunity), meter("Freshness", f.freshness)));
 
-  function rankSection(title, lead, rows) {
-    if (!rows.length) return null;
-    const sorted = [...rows].sort((a, b) => (Number(b.checked) - Number(a.checked)) || ((b.fit ?? -1) - (a.fit ?? -1)));
-    return el("section", { class: "block" }, el("h2", { textContent: title }), el("p", { class: "lead", textContent: lead }), ...sorted.map(nicheRow));
+    const ideaList = el("div", { style: "grid-column: 2 / 4; margin-top: 14px" },
+      el("div", { class: "small", style: "font-weight:700", textContent: p.ideas.length ? "Top video ideas" : "No video ideas with 2 or more channels yet" }));
+    p.ideas.forEach((idea) => ideaList.append(el("div", { class: "metric" },
+      el("div", {}, el("b", { textContent: `“${idea.phrase}” ` }), ...idea.tags.map((t) => el("span", { class: "chip", title: TAGS[t][1], textContent: TAGS[t][0] }))),
+      el("div", { class: "small muted", textContent: `${idea.channelCount} channels · ${idea.videoCount} videos · median ${num(idea.medianViews)} views` }),
+      idea.proof ? el("div", { class: "small" }, "Example: ", vlink(idea.proof.title, idea.proof.url), ` (${num(idea.proof.views)} views, ${subs(idea.proof.subscribers)} subscribers)`) : null)));
+    card.append(ideaList);
+
+    const progress = p.subsTotal
+      ? `Checked so far: ${p.subsChecked} of ${p.subsTotal} sub-niches${p.microsTotal ? `, ${p.microsChecked} of ${p.microsTotal} micro-niches` : ""}.`
+      : "";
+    const actions = el("div", { class: "actions" });
+    const ideasBtn = el("button", { type: "button", class: "btn", textContent: "All video ideas" });
+    ideasBtn.addEventListener("click", () => {
+      crumbs = path.slice(0, path.indexOf(f)).map((r) => ({ id: r.id, query: r.query, level: r.level }));
+      showIdeas({ id: f.id, label: f.query, depth: crumbs.length });
+    });
+    const explore = el("button", { type: "button", class: "btn quiet", textContent: "Explore this niche" });
+    explore.addEventListener("click", () => { crumbs = [{ id: p.niche.id, query: p.niche.query, level: "niche" }]; showList(); });
+    actions.append(ideasBtn, explore);
+    if (f.metrics) {
+      let open = null;
+      const toggle = el("button", { type: "button", class: "btn link", textContent: "Show all numbers" });
+      toggle.addEventListener("click", () => {
+        if (open) { open.remove(); open = null; toggle.textContent = "Show all numbers"; return; }
+        open = detailsFor(f); card.append(open); toggle.textContent = "Hide numbers";
+      });
+      actions.append(toggle);
+    }
+    if (progress) actions.append(el("span", { class: "small muted", textContent: progress }));
+    card.append(actions);
+    return card;
   }
 
   async function showReport() {
@@ -605,24 +636,26 @@
       el("p", { class: "small", textContent: "The first time takes 2 to 3 minutes. After that it opens instantly for 7 days, at no cost." })));
     try {
       const rep = await getJSON("/api/report");
-      if (!rep.path.niche) {
+      if (!rep.picks.length) {
         view.replaceChildren(el("div", { class: "notice" },
-          el("p", { textContent: "No data yet today. " + (rep.notes.join(" ") || "") }),
+          el("p", { textContent: "No data yet today. " + rep.notes.join(" ") }),
           el("p", { class: "small muted", textContent: `YouTube units used today: ${num(rep.unitsUsedToday)} of ${num(rep.dailyLimit)}.` })));
         return;
       }
-      const target = rep.path.micro ?? rep.path.sub ?? rep.path.niche;
+      const waiting = rep.niches.filter((n) => !n.checked);
+      const top = rep.picks[0];
       view.replaceChildren(
         el("p", { class: "muted small", style: "margin-bottom:12px", textContent: `Updated ${new Date(rep.builtAt).toLocaleString()}. YouTube units used today: ${num(rep.unitsUsedToday)} of ${num(rep.dailyLimit)} (automatic checks stop at ${num(rep.dailyAutoCap)}).` }),
         ...rep.notes.map((n) => el("div", { class: "notice", textContent: n })),
-        pathCard(rep),
-        ...(rep.ideas ? ideasSections(rep.ideas, { maxIdeas: 5 }).map((sec, i) => {
-          if (i === 0) sec.children[0].textContent = `Video ideas for “${target.query}”`;
+        el("div", { class: "bar-row" },
+          el("div", {}, el("h2", { textContent: `Your top ${rep.picks.length} choices` }),
+            el("p", { class: "muted small", textContent: "Ranked by Fit. Each one shows its best sub-niche and micro-niche (once checked), the key numbers, and its top video ideas." }))),
+        ...rep.picks.map(pickCard),
+        waiting.length ? el("div", { class: "panel muted", textContent: `Not checked yet: ${waiting.map((n) => n.query).join(", ")}. They'll be added automatically tomorrow.` }) : null,
+        ...(rep.ideas ? ideasSections(rep.ideas, { maxIdeas: 10 }).map((sec, i) => {
+          if (i === 0) sec.children[0].textContent = `All video ideas for #1: “${top.focus.query}”`;
           return sec;
         }) : []),
-        rankSection(`Micro-niches inside “${rep.path.sub?.query ?? ""}”`, "Ranked by Fit. Open “Show all numbers” on any of them for the details.", rep.micros),
-        rankSection(`Sub-niches inside “${rep.path.niche.query}”`, "Ranked by Fit.", rep.subs),
-        rankSection("All 10 niches", "Ranked by Fit. You can open any of them to explore it yourself.", rep.niches),
       );
     } catch (err) {
       view.replaceChildren(el("div", { class: "notice error", textContent: err.message }));

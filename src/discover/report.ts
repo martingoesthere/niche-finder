@@ -4,9 +4,9 @@ import { DAILY_AUTO_CAP, DAILY_LIMIT, addUnits, autoBudgetLeft, unitsUsedToday }
 import { checkNodes, collectOptionsFor, type NodeRow } from "./discover.js";
 import { NICHE_TREE, findNode, type TreeNode } from "./nicheTree.js";
 
-// Automatic report (no input at all):
-// checks the 10 niches, then the best niche's sub-niches, then the best sub-niche's
-// micro-niches, and returns everything plus video ideas for the best one.
+// Automatic report (no input at all): your top 10 choices.
+// Checks the 10 niches, then goes deeper into each one, best first: its sub-niches,
+// then the best sub-niche's micro-niches. Each pick shows its best path and top video ideas.
 // Never auto-spends more than DAILY_AUTO_CAP units per day; saved data is reused for 7 days.
 
 function best(rows: NodeRow[]): NodeRow | null {
@@ -16,51 +16,119 @@ function best(rows: NodeRow[]): NodeRow | null {
   return checked[0] ?? null;
 }
 
-async function checkWithinBudget(nodes: TreeNode[]): Promise<{ rows: NodeRow[]; note: string | null }> {
+type Checked = { rows: NodeRow[]; skipped: number; error: string | null };
+
+async function checkWithinBudget(nodes: TreeNode[]): Promise<Checked> {
   const budget = await autoBudgetLeft();
   const report = await checkNodes(nodes, budget, (line) => console.log("   " + line));
   await addUnits(report.unitsUsed);
-  let note: string | null = null;
-  if (report.error) note = `Stopped early: ${report.error}`;
-  else if (report.skipped.length) note = `${report.skipped.length} not checked yet to protect today's quota. They'll be checked automatically tomorrow.`;
-  return { rows: report.rows, note };
+  return { rows: report.rows, skipped: report.skipped.length, error: report.error };
+}
+
+export type PickIdea = {
+  phrase: string;
+  tags: string[];
+  videoCount: number;
+  channelCount: number;
+  medianViews: number;
+  proof: { title: string; url: string; views: number; subscribers: number | null } | null;
+};
+
+export type Pick = {
+  rank: number;
+  niche: NodeRow;
+  bestSub: NodeRow | null;
+  bestMicro: NodeRow | null;
+  focus: NodeRow; // the most specific level with real data: its numbers and ideas are shown
+  subsChecked: number;
+  subsTotal: number;
+  microsChecked: number;
+  microsTotal: number;
+  ideas: PickIdea[]; // top 3 video ideas for the focus
+};
+
+// Top video ideas for one checked node, from saved data only (free)
+async function ideasFor(row: NodeRow) {
+  const node = findNode(row.id)!;
+  const result = await collectNiche(node.query, { ...collectOptionsFor(node), cacheOnly: true });
+  return analysisFor(result);
 }
 
 export async function buildReport() {
   const notes: string[] = [];
+  let waiting = { niches: 0, subs: 0, micros: 0 };
+  let error: string | null = null;
 
+  // 1. The 10 niches
   const niches = await checkWithinBudget(NICHE_TREE);
-  if (niches.note) notes.push(`Niches: ${niches.note}`);
-  const bestNiche = best(niches.rows);
+  waiting.niches = niches.skipped;
+  error ??= niches.error;
 
-  let subs: NodeRow[] = [];
-  let bestSub: NodeRow | null = null;
-  if (bestNiche) {
-    const node = findNode(bestNiche.id)!;
-    const checked = await checkWithinBudget(node.children);
-    if (checked.note) notes.push(`Sub-niches: ${checked.note}`);
-    subs = checked.rows;
-    bestSub = best(subs);
+  // 2. Go deeper, best niche first: its sub-niches, then the best sub-niche's micro-niches.
+  //    When today's automatic limit is reached, the rest are read from saved data only.
+  const ranked = niches.rows
+    .filter((r) => r.checked)
+    .sort((a, b) => (b.fit ?? -1) - (a.fit ?? -1) || b.sampleSize - a.sampleSize);
+
+  const picks: Pick[] = [];
+  for (const niche of ranked) {
+    const nicheNode = findNode(niche.id)!;
+    const subs = await checkWithinBudget(nicheNode.children);
+    waiting.subs += subs.skipped;
+    error ??= subs.error;
+    const scoredSub = subs.rows.find((r) => r.fit !== null) ? best(subs.rows) : null;
+
+    let micros: Checked = { rows: [], skipped: 0, error: null };
+    let bestMicro: NodeRow | null = null;
+    if (scoredSub) {
+      micros = await checkWithinBudget(findNode(scoredSub.id)!.children);
+      waiting.micros += micros.skipped;
+      error ??= micros.error;
+      bestMicro = micros.rows.find((r) => r.fit !== null) ? best(micros.rows) : null;
+    }
+
+    const focus = bestMicro ?? scoredSub ?? niche;
+    const analysis = await ideasFor(focus);
+    picks.push({
+      rank: picks.length + 1,
+      niche,
+      bestSub: scoredSub,
+      bestMicro,
+      focus,
+      subsChecked: subs.rows.filter((r) => r.checked).length,
+      subsTotal: subs.rows.length,
+      microsChecked: micros.rows.filter((r) => r.checked).length,
+      microsTotal: scoredSub ? findNode(scoredSub.id)!.children.length : 0,
+      ideas: analysis.topics.slice(0, 3).map((t) => ({
+        phrase: t.phrase,
+        tags: t.tags,
+        videoCount: t.videoCount,
+        channelCount: t.channelCount,
+        medianViews: t.medianViews,
+        proof: t.proof[0]
+          ? { title: t.proof[0].title, url: t.proof[0].url, views: t.proof[0].views, subscribers: t.proof[0].subscribers }
+          : null,
+      })),
+    });
   }
 
-  let micros: NodeRow[] = [];
-  let bestMicro: NodeRow | null = null;
-  if (bestSub) {
-    const node = findNode(bestSub.id)!;
-    const checked = await checkWithinBudget(node.children);
-    if (checked.note) notes.push(`Micro-niches: ${checked.note}`);
-    micros = checked.rows;
-    bestMicro = micros.find((r) => r.fit !== null) ? best(micros) : null;
+  // 3. Rank the 10 picks by the Fit of their most specific checked level
+  picks.sort((a, b) => (b.focus.fit ?? -1) - (a.focus.fit ?? -1) || (b.niche.fit ?? -1) - (a.niche.fit ?? -1));
+  picks.forEach((p, i) => (p.rank = i + 1));
+
+  if (error) notes.push(`Stopped early: ${error}`);
+  const waitingParts = [
+    waiting.niches ? `${waiting.niches} niches` : "",
+    waiting.subs ? `${waiting.subs} sub-niches` : "",
+    waiting.micros ? `${waiting.micros} micro-niches` : "",
+  ].filter(Boolean);
+  if (waitingParts.length) {
+    notes.push(`Today's automatic limit is reached. Still waiting: ${waitingParts.join(", ")}. They'll be checked automatically tomorrow, so this list gets more complete each day.`);
   }
 
-  // Video ideas for the most specific level that has a real score (saved data: free)
-  const ideasRow = bestMicro ?? bestSub ?? bestNiche;
-  let ideas = null;
-  if (ideasRow) {
-    const node = findNode(ideasRow.id)!;
-    const result = await collectNiche(node.query, { ...collectOptionsFor(node), cacheOnly: true });
-    ideas = { forId: ideasRow.id, ...analysisFor(result) };
-  }
+  // Full video ideas for the #1 pick (saved data: free)
+  const top = picks[0] ?? null;
+  const ideas = top ? { forId: top.focus.id, ...(await ideasFor(top.focus)) } : null;
 
   return {
     builtAt: new Date().toISOString(),
@@ -68,11 +136,8 @@ export async function buildReport() {
     dailyAutoCap: DAILY_AUTO_CAP,
     dailyLimit: DAILY_LIMIT,
     notes,
-    path: { niche: bestNiche, sub: bestSub, micro: bestMicro },
+    picks,
     niches: niches.rows,
-    subs,
-    micros,
     ideas,
   };
 }
-
