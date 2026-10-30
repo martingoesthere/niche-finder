@@ -63,6 +63,10 @@
     .scoregrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; margin: 12px 0; }
     .scoreblock { border: 1px solid var(--line); border-radius: 10px; padding: 10px; }
     .scoreblock .num { font-size: 18px; }
+    .metric { margin-top: 8px; }
+    .mtext { font-size: 14px; font-variant-numeric: tabular-nums; }
+    .why { color: var(--muted); font-size: 12.5px; font-style: italic; }
+    body.noexplain .why { display: none; }
     .crumbs a { cursor: pointer; }
     .small { padding: 6px 10px; font-size: 13px; border-radius: 8px; }
     td .small { margin: 2px 4px 2px 0; white-space: nowrap; }
@@ -414,12 +418,27 @@
     videos: { label: "Videos used (data size)", get: (r) => r.metrics?.videos ?? null },
   };
 
-  function scoreBlock(name, score, lines) {
+  // Each line is [the number in simple words, why it matters]
+  function metricLine([text, why]) {
+    return el("div", { class: "metric" },
+      el("div", { class: "mtext", textContent: text }),
+      why ? el("div", { class: "why", textContent: "Why it matters: " + why }) : null,
+    );
+  }
+
+  function scoreBlock(name, score, question, lines) {
     return el("div", { class: "scoreblock" },
       el("div", { class: "row" }, el("span", { class: "name", textContent: name }), el("span", { class: "num", textContent: score === null ? "—" : score })),
+      el("div", { class: "why", textContent: question }),
       score === null ? null : el("div", { class: "bar" }, el("div", { style: `width:${score}%` })),
-      ...lines.map((t) => el("div", { class: "meta", textContent: t })),
+      ...lines.map(metricLine),
     );
+  }
+
+  function explainToggle() {
+    const box = el("input", { type: "checkbox", checked: !document.body.classList.contains("noexplain") });
+    box.addEventListener("change", () => document.body.classList.toggle("noexplain", !box.checked));
+    return el("label", { class: "meta" }, box, " Show explanations");
   }
 
   function nodeCard(r, i, sortLabel) {
@@ -441,6 +460,7 @@
       el("div", {},
         el("span", { class: "num", textContent: !r.checked ? "not checked" : r.fit === null ? "not scored" : `Fit ${r.fit}` }),
         r.checked ? el("div", { class: "meta", textContent: `confidence: ${r.confidence} · data from ${new Date(r.checkedAt).toLocaleDateString()}` }) : null,
+        r.fit !== null ? el("div", { class: "why", textContent: `Fit = (${r.demand} + (100 − ${r.competition}) + ${r.opportunity} + ${r.freshness}) ÷ 4 = ${r.fit}` }) : null,
       ),
     );
     if (!r.checked) return el("div", { class: "card" }, head, el("p", { class: "meta", textContent: "No YouTube data yet. Use the check button above." }), actions);
@@ -450,33 +470,54 @@
     const removedText = Object.entries(r.removed).map(([k, n]) => `${n} ${REMOVED[k] ?? k}`).join(", ") || "none";
 
     const grid = el("div", { class: "scoregrid" },
-      scoreBlock("Demand", r.demand, [
-        `Median views: ${fmtD(m.medianViews)}`,
-        `Median views per day: ${fmtD(m.medianViewsPerDay)}`,
-        `Median views by upload age: ${winText}`,
+      scoreBlock("Demand", r.demand, "Do people watch this? (higher is better)", [
+        [`Median views: ${fmtD(m.medianViews)}`,
+          "the “middle” video's views (half got more, half got less). It shows what a normal video gets, not one lucky viral hit."],
+        [`Median views per day: ${fmtD(m.medianViewsPerDay)}`,
+          "how fast videos get views. A new video with many views per day is hotter than an old one with the same total."],
+        [`Median views by upload age: ${winText}`,
+          "if videos from the last 3–6 months still do well, the niche is alive now, not just in the past."],
       ]),
-      scoreBlock("Competition", r.competition, [
-        `Median subscribers: ${fmtD(m.medianSubscribers)} (${m.channelsWithPublicSubs} channels with public counts)`,
-        `Giant channels (1M+ subs): ${m.giantChannels} of ${m.channelsWithPublicSubs} (${pct(m.giantChannels, m.channelsWithPublicSubs) ?? "—"}%)`,
-        `Different channels in the data: ${m.channels}`,
+      scoreBlock("Competition", r.competition, "How big are the channels you'd compete with? (lower is easier)", [
+        [`Median subscribers: ${fmtD(m.medianSubscribers)} (${m.channelsWithPublicSubs} channels with public counts)`,
+          "the size of a normal channel here. 5M subs is hard to beat; 50K gives a new channel a chance."],
+        [`Giant channels (1M+ subs): ${m.giantChannels} of ${m.channelsWithPublicSubs} (${pct(m.giantChannels, m.channelsWithPublicSubs) ?? "—"}%)`,
+          "giants take the top spots in search and suggestions. Fewer giants = more room for you."],
+        [`Different channels in the data: ${m.channels}`,
+          "many channels = lots of people succeed here. Very few = one or two creators own the niche."],
       ]),
-      scoreBlock("Opportunity", r.opportunity, [
-        `${m.outlierVideos} of ${m.smallChannelVideos} videos from channels under 1M subs got 2×+ more views than subscribers (${pct(m.outlierVideos, m.smallChannelVideos) ?? "—"}%)`,
-        `Videos with 3×+ their own channel's average views: ${r.channelOutliers}`,
-        r.bestOutlier ? `Best: ${r.bestOutlier.ratio}× its channel, ${fmt(r.bestOutlier.views)} views, ${fmt(r.bestOutlier.subscribers)} subs` : "Best: none",
+      scoreBlock("Opportunity", r.opportunity, "Can a small channel win here? (higher is better)", [
+        [`${m.outlierVideos} of ${m.smallChannelVideos} videos from channels under 1M subs got 2×+ more views than subscribers (${pct(m.outlierVideos, m.smallChannelVideos) ?? "—"}%)`,
+          "proof that YouTube shows these videos to new people, not just subscribers. That's how small channels grow."],
+        [`Videos with 3×+ their own channel's average views: ${r.channelOutliers}`,
+          "these topics pushed a channel far above its normal. Copy the topic, not the channel."],
+        [r.bestOutlier ? `Best outlier: ${r.bestOutlier.ratio}× its channel, ${fmt(r.bestOutlier.views)} views, ${fmt(r.bestOutlier.subscribers)} subs` : "Best outlier: none",
+          "your best video idea to study first."],
       ]),
-      scoreBlock("Freshness", r.freshness, [
-        `Channels under 1 year old: ${m.newChannels} of ${m.channels} (${pct(m.newChannels, m.channels) ?? "—"}%)`,
-        `Videos made by them: ${m.newChannelVideos} of ${m.videos} (${pct(m.newChannelVideos, m.videos) ?? "—"}%)`,
-        `Uploads in the last 90 days: ${m.videosLast90Days} of ${m.videos}`,
+      scoreBlock("Freshness", r.freshness, "Are new channels making it? (higher is better)", [
+        [`Channels under 1 year old: ${m.newChannels} of ${m.channels} (${pct(m.newChannels, m.channels) ?? "—"}%)`,
+          "if new channels succeed, you can too. If none do, the door may be closed."],
+        [`Videos made by them: ${m.newChannelVideos} of ${m.videos} (${pct(m.newChannelVideos, m.videos) ?? "—"}%)`,
+          "how much space new creators are really getting in the results."],
+        [`Uploads in the last 90 days: ${m.videosLast90Days} of ${m.videos}`,
+          "few recent uploads with strong views = a gap: people want videos, but not enough are being made."],
       ]),
     );
 
-    const facts = el("div", { class: "meta" },
-      `Data: ${m.videos} verified videos used of ${r.totalFound} found (removed: ${removedText}) · `,
-      `median length ${m.medianDurationMin ?? "—"} min · `,
-      `likes per 1,000 views ${m.medianLikesPer1kViews ?? "—"} · comments per 1,000 views ${m.medianCommentsPer1kViews ?? "—"} · `,
-      `topic ideas found: ${r.topicCount}`,
+    const facts = el("div", { class: "scoreblock" },
+      el("div", { class: "name", textContent: "Extra numbers" }),
+      metricLine([`Data: ${m.videos} verified videos used of ${r.totalFound} found (removed: ${removedText})`,
+        "more videos = more trustworthy scores. Under 30 = no score."]),
+      metricLine([`Confidence: ${r.confidence}`,
+        "low = 30–49 videos, medium = 50–99, high = 100+. Tells you how much to trust the scores."]),
+      metricLine([`Median video length: ${m.medianDurationMin ?? "—"} min`,
+        "what length viewers accept here. 8+ minutes allows more ads."]),
+      metricLine([`Likes per 1,000 views: ${m.medianLikesPer1kViews ?? "—"}`,
+        "a rough sign viewers care, not just click."]),
+      metricLine([`Comments per 1,000 views: ${m.medianCommentsPer1kViews ?? "—"}`,
+        "people who comment often come back and ask for new videos."]),
+      metricLine([`Topic ideas found: ${r.topicCount}`,
+        "phrases that worked for 2+ channels. More ideas = you won't run out of videos."]),
     );
 
     const topicChips = el("div", { class: "chips" }, el("span", { class: "meta", textContent: "Popular topics: " }));
@@ -486,7 +527,8 @@
       ? el("div", { class: "meta" }, "Best proof: ", el("a", { href: r.bestOutlier.url, target: "_blank", rel: "noopener", textContent: r.bestOutlier.title }))
       : null;
 
-    return el("div", { class: "card" }, head, grid, facts, topicChips, proof, actions);
+    grid.append(facts);
+    return el("div", { class: "card" }, head, grid, topicChips, proof, actions);
   }
 
   async function loadTree(message) {
@@ -537,8 +579,12 @@
           el("div", { class: "meta", textContent: "Fit = (Demand + (100 − Competition) + Opportunity + Freshness) ÷ 4. Equal weights: a sorting aid, not a prediction." }),
           el("div", { class: "meta", textContent: "No score below 30 verified videos. Money isn't included (no real ad-rate data yet)." }),
         ),
+        el("div", { class: "card" },
+          el("strong", { textContent: "How to read a card, in one sentence" }),
+          el("div", { class: "meta", textContent: "Look for high Demand + high Opportunity + some Freshness, with Competition not too high, and check that confidence isn't based on just a few videos." }),
+        ),
         el("div", { class: "row" }, el("span", { class: "meta", textContent: `${d.rows.length} ${LEVEL_NAME[levelOf]}s` }),
-          el("label", { class: "meta" }, "Sort by ", sortSelect)),
+          el("span", {}, explainToggle(), el("label", { class: "meta" }, "  Sort by ", sortSelect))),
         list,
       );
     } catch (err) {
