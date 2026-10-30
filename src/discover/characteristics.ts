@@ -32,7 +32,7 @@ const GROUPS: Array<[group: string, rows: Row[]]> = [
   ["Room for new channels", [
     ["Top results are not all giant channels", "measured", "Competition score"],
     ["Small channels get outlier videos", "measured", "Opportunity score"],
-    ["Channels under 1 year old are succeeding", "measured", "Freshness score"],
+    ["Channels less than 6 months old are succeeding", "measured", "Freshness score"],
     ["The same topic works for several different channels", "measured", "repeated success tag"],
     ["High views but few recent videos (a gap)", "measured", "gap tag"],
     ["Videos far above their channel's normal views", "measured", "outlier score"],

@@ -149,7 +149,7 @@
       <dt>Opportunity: can a small channel win here?</dt>
       <dd>Of the videos from channels under 1M subscribers, the share that got more than twice as many views as the channel has subscribers. 30% or more = 100. Higher is better.</dd>
       <dt>Freshness: are new channels making it?</dt>
-      <dd>The share of videos made by channels that are less than 1 year old. 20% or more = 100. Higher is better.</dd>
+      <dd>The share of videos made by channels that are less than 6 months old. 20% or more = 100. Higher is better.</dd>
       <dt>Fit</dt>
       <dd>(Demand + (100 − Competition) + Opportunity + Freshness) ÷ 4. All four count the same. It's for sorting the list, not a promise.</dd>
       <dt>High, Medium, Low</dt>
@@ -281,7 +281,7 @@
     const breakout = pct(m.outlierVideos, m.smallChannelVideos);
     if (breakout !== null) parts.push(`${breakout}% of videos from channels under 1M subs got more views than double their subscribers`);
     const fresh = pct(m.newChannels, m.channels);
-    if (fresh !== null) parts.push(`${fresh}% of the channels are less than a year old`);
+    if (fresh !== null) parts.push(`${fresh}% of the channels are less than 6 months old`);
     return parts.join(", ") + ".";
   }
 
@@ -340,7 +340,7 @@
             : null,
         ]),
         scoreBox("Freshness", r.freshness, "Are new channels making it? Higher is better.", false, [
-          metric(`Channels less than 1 year old: ${m.newChannels} of ${m.channels} (${pct(m.newChannels, m.channels) ?? "—"}%)`, "If new channels succeed, you can too. If none do, the door may be closed."),
+          metric(`Channels less than 6 months old: ${m.newChannels} of ${m.channels} (${pct(m.newChannels, m.channels) ?? "—"}%)`, "If new channels succeed, you can too. If none do, the door may be closed."),
           metric(`Videos made by those new channels: ${m.newChannelVideos} of ${m.videos} (${pct(m.newChannelVideos, m.videos) ?? "—"}%)`, "How much space new creators really get in the results."),
           metric(`Uploads in the last 90 days: ${m.videosLast90Days} of ${m.videos}`, "Few recent uploads with strong views is a gap: people want videos, but not enough are being made."),
         ]),
@@ -693,7 +693,7 @@
       panel.append(el("div", {}, el("label", { textContent: label }), el("div", { class: "pair" }, inputs["min-" + key], "to", inputs["max-" + key])));
     }
     const uploaded = el("select", {}, ...opt([["", "Any time"], ["30", "Last 30 days"], ["90", "Last 90 days"], ["180", "Last 6 months"], ["365", "Last 12 months"]]));
-    const created = el("select", {}, ...opt([["", "Any age"], ["365", "Less than 1 year old"], ["730", "Less than 2 years old"]]));
+    const created = el("select", {}, ...opt([["", "Any age"], ["182", "Less than 6 months old"], ["365", "Less than 1 year old"], ["730", "Less than 2 years old"]]));
     const country = el("select", {}, ...opt([["", "All countries"], ...[...new Set(videos.map((v) => v.country ?? "not set"))].sort().map((c) => [c, c])]));
     const sortBy = el("select", {}, ...opt(Object.entries(XSORTS).map(([k, [t]]) => [k, t])));
     const order = el("select", {}, ...opt([["desc", "Highest or newest first"], ["asc", "Lowest or oldest first"]]));

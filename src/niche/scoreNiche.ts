@@ -5,6 +5,7 @@ export const MIN_VIDEOS_FOR_SCORE = 30; // your minimum data rule
 export const MIN_FOR_SUBSCORE = 10; // each score needs at least this many items
 export const GIANT_CHANNEL_SUBS = 1_000_000; // excluded from Opportunity
 export const OUTLIER_RATIO = 2; // video views must be 2x the channel's subscribers
+export const NEW_CHANNEL_DAYS = 182; // "new channel" = started less than 6 months ago
 const DAY_MS = 86_400_000;
 
 // ---------- Shapes ----------
@@ -33,7 +34,7 @@ export type NicheMetrics = {
   giantChannels: number; // channels with 1M+ subscribers
   smallChannelVideos: number; // videos from channels under 1M (Opportunity pool)
   outlierVideos: number; // of those, videos with 2x+ more views than subscribers
-  newChannels: number; // channels under 1 year old
+  newChannels: number; // channels less than 6 months old
   newChannelVideos: number; // videos made by those channels
   medianDurationMin: number | null;
   videosLast90Days: number;
@@ -114,7 +115,7 @@ export function scoreNiche(videos: VideoInfo[], channels: ChannelInfo[], now = n
     .map((id) => channelById.get(id))
     .filter((c): c is ChannelInfo => c !== undefined);
   const publicSubs = allNicheChannels.map((c) => c.subscribers).filter((x): x is number => x !== null);
-  const isNewChannel = (c: ChannelInfo) => now.getTime() - new Date(c.createdAt).getTime() < 365 * DAY_MS;
+  const isNewChannel = (c: ChannelInfo) => now.getTime() - new Date(c.createdAt).getTime() < NEW_CHANNEL_DAYS * DAY_MS;
   const newChannelIds = new Set(allNicheChannels.filter(isNewChannel).map((c) => c.id));
   const smallPool = videos.filter((v) => {
     const subs = subsOf(v);
@@ -241,7 +242,7 @@ export function scoreNiche(videos: VideoInfo[], channels: ChannelInfo[], now = n
     };
   }
 
-  // ---- 4. Freshness: channels under 1 year old ----
+  // ---- 4. Freshness: channels less than 6 months old ----
   const allChannels = [...new Set(videos.map((v) => v.channelId))]
     .map((id) => channelById.get(id))
     .filter((c): c is ChannelInfo => c !== undefined);
@@ -254,7 +255,7 @@ export function scoreNiche(videos: VideoInfo[], channels: ChannelInfo[], now = n
       `Only ${allChannels.length} channels (need ${MIN_FOR_SUBSCORE}+).`,
     );
   } else {
-    const isNew = (c: ChannelInfo) => now.getTime() - new Date(c.createdAt).getTime() < 365 * DAY_MS;
+    const isNew = (c: ChannelInfo) => now.getTime() - new Date(c.createdAt).getTime() < NEW_CHANNEL_DAYS * DAY_MS;
     const newIds = new Set(allChannels.filter(isNew).map((c) => c.id));
     const freshVideos = videos.filter((v) => newIds.has(v.channelId)).sort((a, b) => b.views - a.views);
     const share = freshVideos.length / n;
@@ -262,7 +263,7 @@ export function scoreNiche(videos: VideoInfo[], channels: ChannelInfo[], now = n
       name: "Freshness",
       score: shareScore(share, 0.2),
       meaning: MEANINGS.freshness,
-      explanation: `${newIds.size} of ${allChannels.length} channels are under 1 year old; they made ${freshVideos.length} of ${n} videos (${Math.round(share * 100)}%; 20%+ = 100).`,
+      explanation: `${newIds.size} of ${allChannels.length} channels are less than 6 months old; they made ${freshVideos.length} of ${n} videos (${Math.round(share * 100)}%; 20%+ = 100).`,
       proof: freshVideos.slice(0, 3).map((v) => ({
         label: v.title,
         detail: `${fmt(v.views)} views | channel started ${channelById.get(v.channelId)?.createdAt.slice(0, 10)} | ${v.channelTitle}`,
