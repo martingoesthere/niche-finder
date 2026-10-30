@@ -60,6 +60,9 @@
     tr.click:hover td { background: var(--bar); }
     .tablewrap { overflow-x: auto; }
     .crumbs { margin: 0 0 12px; font-size: 14px; }
+    .scoregrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; margin: 12px 0; }
+    .scoreblock { border: 1px solid var(--line); border-radius: 10px; padding: 10px; }
+    .scoreblock .num { font-size: 18px; }
     .crumbs a { cursor: pointer; }
     .small { padding: 6px 10px; font-size: 13px; border-radius: 8px; }
     td .small { margin: 2px 4px 2px 0; white-space: nowrap; }
@@ -394,6 +397,98 @@
     }
   }
 
+  const fmtD = (n) => (n === null || n === undefined ? "—" : Math.round(n).toLocaleString("en-US"));
+  const pct = (a, b) => (b > 0 ? Math.round((a / b) * 100) : null);
+  let treeSortKey = "fit";
+  const TREE_SORTS = {
+    fit: { label: "Fit", get: (r) => r.fit },
+    demand: { label: "Demand", get: (r) => r.demand },
+    lowComp: { label: "Lowest competition", get: (r) => (r.competition === null ? null : 100 - r.competition) },
+    opportunity: { label: "Opportunity", get: (r) => r.opportunity },
+    freshness: { label: "Freshness", get: (r) => r.freshness },
+    medianViews: { label: "Median views", get: (r) => r.metrics?.medianViews ?? null },
+    viewsPerDay: { label: "Median views per day", get: (r) => r.metrics?.medianViewsPerDay ?? null },
+    outlierShare: { label: "% small-channel outliers", get: (r) => (r.metrics ? pct(r.metrics.outlierVideos, r.metrics.smallChannelVideos) : null) },
+    newChannels: { label: "New channels (under 1 year)", get: (r) => r.metrics?.newChannels ?? null },
+    recent: { label: "Uploads in last 90 days", get: (r) => r.metrics?.videosLast90Days ?? null },
+    videos: { label: "Videos used (data size)", get: (r) => r.metrics?.videos ?? null },
+  };
+
+  function scoreBlock(name, score, lines) {
+    return el("div", { class: "scoreblock" },
+      el("div", { class: "row" }, el("span", { class: "name", textContent: name }), el("span", { class: "num", textContent: score === null ? "—" : score })),
+      score === null ? null : el("div", { class: "bar" }, el("div", { style: `width:${score}%` })),
+      ...lines.map((t) => el("div", { class: "meta", textContent: t })),
+    );
+  }
+
+  function nodeCard(r, i, sortLabel) {
+    const m = r.metrics;
+    const actions = el("div", { class: "actions" });
+    if (r.childCount > 0) {
+      const open = el("button", { type: "button", class: "small", textContent: `Open ${r.childCount} ${LEVEL_NAME[r.level === "niche" ? "sub" : "micro"]}s ▸` });
+      open.addEventListener("click", () => { crumbs.push({ id: r.id, query: r.query }); loadTree(); });
+      actions.append(open);
+    }
+    if (r.checked) {
+      const topics = el("button", { type: "button", class: "small plain", textContent: "Topics & proof" });
+      topics.addEventListener("click", () => showTopics(r));
+      actions.append(topics);
+    }
+
+    const head = el("div", { class: "row" },
+      el("div", {}, el("strong", { textContent: `#${i + 1} ${r.query}` }), el("span", { class: "meta", textContent: `  ${r.group}` })),
+      el("div", {},
+        el("span", { class: "num", textContent: !r.checked ? "not checked" : r.fit === null ? "not scored" : `Fit ${r.fit}` }),
+        r.checked ? el("div", { class: "meta", textContent: `confidence: ${r.confidence} · data from ${new Date(r.checkedAt).toLocaleDateString()}` }) : null,
+      ),
+    );
+    if (!r.checked) return el("div", { class: "card" }, head, el("p", { class: "meta", textContent: "No YouTube data yet. Use the check button above." }), actions);
+
+    const w = (months) => r.windows.find((x) => x.months === months);
+    const winText = [3, 6, 12].map((mo) => `${mo}m: ${fmtD(w(mo)?.medianViews ?? null)} (${w(mo)?.videos ?? 0} videos)`).join(" · ");
+    const removedText = Object.entries(r.removed).map(([k, n]) => `${n} ${REMOVED[k] ?? k}`).join(", ") || "none";
+
+    const grid = el("div", { class: "scoregrid" },
+      scoreBlock("Demand", r.demand, [
+        `Median views: ${fmtD(m.medianViews)}`,
+        `Median views per day: ${fmtD(m.medianViewsPerDay)}`,
+        `Median views by upload age: ${winText}`,
+      ]),
+      scoreBlock("Competition", r.competition, [
+        `Median subscribers: ${fmtD(m.medianSubscribers)} (${m.channelsWithPublicSubs} channels with public counts)`,
+        `Giant channels (1M+ subs): ${m.giantChannels} of ${m.channelsWithPublicSubs} (${pct(m.giantChannels, m.channelsWithPublicSubs) ?? "—"}%)`,
+        `Different channels in the data: ${m.channels}`,
+      ]),
+      scoreBlock("Opportunity", r.opportunity, [
+        `${m.outlierVideos} of ${m.smallChannelVideos} videos from channels under 1M subs got 2×+ more views than subscribers (${pct(m.outlierVideos, m.smallChannelVideos) ?? "—"}%)`,
+        `Videos with 3×+ their own channel's average views: ${r.channelOutliers}`,
+        r.bestOutlier ? `Best: ${r.bestOutlier.ratio}× its channel, ${fmt(r.bestOutlier.views)} views, ${fmt(r.bestOutlier.subscribers)} subs` : "Best: none",
+      ]),
+      scoreBlock("Freshness", r.freshness, [
+        `Channels under 1 year old: ${m.newChannels} of ${m.channels} (${pct(m.newChannels, m.channels) ?? "—"}%)`,
+        `Videos made by them: ${m.newChannelVideos} of ${m.videos} (${pct(m.newChannelVideos, m.videos) ?? "—"}%)`,
+        `Uploads in the last 90 days: ${m.videosLast90Days} of ${m.videos}`,
+      ]),
+    );
+
+    const facts = el("div", { class: "meta" },
+      `Data: ${m.videos} verified videos used of ${r.totalFound} found (removed: ${removedText}) · `,
+      `median length ${m.medianDurationMin ?? "—"} min · `,
+      `likes per 1,000 views ${m.medianLikesPer1kViews ?? "—"} · comments per 1,000 views ${m.medianCommentsPer1kViews ?? "—"} · `,
+      `topic ideas found: ${r.topicCount}`,
+    );
+
+    const topicChips = el("div", { class: "chips" }, el("span", { class: "meta", textContent: "Popular topics: " }));
+    r.topTopics.forEach((t) => topicChips.append(el("span", { class: "chip", textContent: t })));
+    if (!r.topTopics.length) topicChips.append(el("span", { class: "meta", textContent: "none with 2+ channels yet" }));
+    const proof = r.bestOutlier
+      ? el("div", { class: "meta" }, "Best proof: ", el("a", { href: r.bestOutlier.url, target: "_blank", rel: "noopener", textContent: r.bestOutlier.title }))
+      : null;
+
+    return el("div", { class: "card" }, head, grid, facts, topicChips, proof, actions);
+  }
+
   async function loadTree(message) {
     renderCrumbs();
     const box = document.getElementById("tree");
@@ -418,44 +513,34 @@
         ));
       }
 
-      const n = (v) => (v === null ? "—" : v);
-      const table = el("table", {},
-        el("tr", {}, ...["#", LEVEL_NAME[d.rows[0]?.level ?? "niche"], "Fit", "Demand", "Competition", "Opportunity", "Freshness", "Confidence", "Popular topics", ""].map((h) => el("th", { textContent: h }))),
-      );
-      d.rows.forEach((r, i) => {
-        const actions = el("td", {});
-        if (r.childCount > 0) {
-          const open = el("button", { type: "button", class: "small", textContent: `Open ${r.childCount} ${LEVEL_NAME[r.level === "niche" ? "sub" : "micro"]}s ▸` });
-          open.addEventListener("click", () => { crumbs.push({ id: r.id, query: r.query }); loadTree(); });
-          actions.append(open);
-        }
-        if (r.checked) {
-          const topics = el("button", { type: "button", class: "small plain", textContent: "Topics & proof" });
-          topics.addEventListener("click", () => showTopics(r));
-          actions.append(topics);
-        }
-        const topicChips = el("div", {});
-        r.topTopics.forEach((t) => topicChips.append(el("span", { class: "chip", textContent: t })));
-        if (r.bestOutlier) {
-          topicChips.append(el("div", { class: "meta" },
-            el("a", { href: r.bestOutlier.url, target: "_blank", rel: "noopener", textContent: `${r.bestOutlier.ratio}× · ${r.bestOutlier.title}` })));
-        }
-        table.append(el("tr", {},
-          el("td", { class: "n", textContent: i + 1 }),
-          el("td", {}, el("strong", { textContent: r.query }), el("div", { class: "meta", textContent: r.group })),
-          el("td", { class: "n", textContent: !r.checked ? "not checked" : r.fit === null ? "not scored" : r.fit }),
-          el("td", { class: "n", textContent: n(r.demand) }),
-          el("td", { class: "n", textContent: n(r.competition) }),
-          el("td", { class: "n", textContent: n(r.opportunity) }),
-          el("td", { class: "n", textContent: n(r.freshness) }),
-          el("td", { textContent: r.checked ? `${r.confidence} (${r.sampleSize})` : "—" }),
-          el("td", {}, r.checked ? topicChips : "—"),
-          actions,
-        ));
-      });
+      const levelOf = d.rows[0]?.level ?? "niche";
+      const sortSelect = selectEl("treeSort", Object.entries(TREE_SORTS).map(([k, v]) => [k, v.label]));
+      sortSelect.value = treeSortKey;
+      const list = el("div", {});
+      const draw = () => {
+        treeSortKey = sortSelect.value;
+        const sort = TREE_SORTS[treeSortKey];
+        const rows = [...d.rows].sort((a, b) => (sort.get(b) ?? -Infinity) - (sort.get(a) ?? -Infinity));
+        list.replaceChildren(...rows.map((r, i) => nodeCard(r, i, sort.label)));
+      };
+      sortSelect.addEventListener("change", draw);
+      draw();
 
-      box.replaceChildren(...intro, el("div", { class: "card tablewrap" }, table),
-        el("p", { class: "meta", textContent: "Fit = average of Demand, Opportunity, Freshness and (100 − Competition): a sorting aid, not a prediction. “Not scored” = fewer than 30 verified videos. Money isn't included yet (no real ad-rate data)." }));
+      box.replaceChildren(
+        ...intro,
+        el("div", { class: "card" },
+          el("strong", { textContent: "How this list is calculated (real YouTube data, US/UK/CA/AU, long videos, last 12 months)" }),
+          el("div", { class: "meta", textContent: "Demand = median views of the verified videos (1K views = 0, 1M = 100, log scale)." }),
+          el("div", { class: "meta", textContent: "Competition = median subscribers of the channels (1K = 0, 10M = 100). Lower is easier." }),
+          el("div", { class: "meta", textContent: "Opportunity = share of videos from channels under 1M subs that got 2×+ more views than subscribers (30% = 100)." }),
+          el("div", { class: "meta", textContent: "Freshness = share of videos made by channels under 1 year old (20% = 100)." }),
+          el("div", { class: "meta", textContent: "Fit = (Demand + (100 − Competition) + Opportunity + Freshness) ÷ 4. Equal weights: a sorting aid, not a prediction." }),
+          el("div", { class: "meta", textContent: "No score below 30 verified videos. Money isn't included (no real ad-rate data yet)." }),
+        ),
+        el("div", { class: "row" }, el("span", { class: "meta", textContent: `${d.rows.length} ${LEVEL_NAME[levelOf]}s` }),
+          el("label", { class: "meta" }, "Sort by ", sortSelect)),
+        list,
+      );
     } catch (err) {
       box.replaceChildren(el("p", { class: "status error", textContent: "❌ " + err.message }));
     }

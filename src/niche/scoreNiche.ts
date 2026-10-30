@@ -22,7 +22,27 @@ export type Score = {
 
 export type WindowStat = { months: number; videos: number; medianViews: number | null };
 
+// The raw numbers behind the scores (shown on the page so you can decide with numbers)
+export type NicheMetrics = {
+  videos: number; // verified long videos used
+  channels: number; // different channels among them
+  channelsWithPublicSubs: number;
+  medianViews: number | null;
+  medianViewsPerDay: number | null;
+  medianSubscribers: number | null; // Competition is based on this
+  giantChannels: number; // channels with 1M+ subscribers
+  smallChannelVideos: number; // videos from channels under 1M (Opportunity pool)
+  outlierVideos: number; // of those, videos with 2x+ more views than subscribers
+  newChannels: number; // channels under 1 year old
+  newChannelVideos: number; // videos made by those channels
+  medianDurationMin: number | null;
+  videosLast90Days: number;
+  medianLikesPer1kViews: number | null; // engagement: likes per 1,000 views
+  medianCommentsPer1kViews: number | null; // engagement: comments per 1,000 views
+};
+
 export type NicheScores = {
+  metrics: NicheMetrics;
   sampleSize: number;
   confidence: Confidence;
   windows: WindowStat[];
@@ -89,6 +109,41 @@ export function scoreNiche(videos: VideoInfo[], channels: ChannelInfo[], now = n
     return { months, videos: inWindow.length, medianViews: median(inWindow.map((v) => v.views)) };
   });
 
+  // Raw numbers (computed even when there is not enough data to score)
+  const allNicheChannels = [...new Set(videos.map((v) => v.channelId))]
+    .map((id) => channelById.get(id))
+    .filter((c): c is ChannelInfo => c !== undefined);
+  const publicSubs = allNicheChannels.map((c) => c.subscribers).filter((x): x is number => x !== null);
+  const isNewChannel = (c: ChannelInfo) => now.getTime() - new Date(c.createdAt).getTime() < 365 * DAY_MS;
+  const newChannelIds = new Set(allNicheChannels.filter(isNewChannel).map((c) => c.id));
+  const smallPool = videos.filter((v) => {
+    const subs = subsOf(v);
+    return subs !== null && subs > 0 && subs < GIANT_CHANNEL_SUBS;
+  });
+  const per1k = (count: number | null, views: number) => (count === null || views <= 0 ? null : (count / views) * 1000);
+  const roundOrNull = (x: number | null, digits = 0) => (x === null ? null : Number(x.toFixed(digits)));
+  const metrics: NicheMetrics = {
+    videos: n,
+    channels: allNicheChannels.length,
+    channelsWithPublicSubs: publicSubs.length,
+    medianViews: roundOrNull(median(videos.map((v) => v.views))),
+    medianViewsPerDay: roundOrNull(
+      median(videos.map((v) => v.views / Math.max(1, (now.getTime() - new Date(v.publishedAt).getTime()) / DAY_MS))),
+    ),
+    medianSubscribers: roundOrNull(median(publicSubs)),
+    giantChannels: publicSubs.filter((x) => x >= GIANT_CHANNEL_SUBS).length,
+    smallChannelVideos: smallPool.length,
+    outlierVideos: smallPool.filter((v) => v.views >= (subsOf(v) ?? Infinity) * OUTLIER_RATIO).length,
+    newChannels: newChannelIds.size,
+    newChannelVideos: videos.filter((v) => newChannelIds.has(v.channelId)).length,
+    medianDurationMin: roundOrNull(median(videos.map((v) => v.durationSeconds / 60)), 1),
+    videosLast90Days: videos.filter((v) => now.getTime() - new Date(v.publishedAt).getTime() <= 90 * DAY_MS).length,
+    medianLikesPer1kViews: roundOrNull(
+      median(videos.map((v) => per1k(v.likes, v.views)).filter((x): x is number => x !== null)), 1),
+    medianCommentsPer1kViews: roundOrNull(
+      median(videos.map((v) => per1k(v.comments, v.views)).filter((x): x is number => x !== null)), 2),
+  };
+
   const money = notScored(
     "Money",
     MEANINGS.money,
@@ -99,6 +154,7 @@ export function scoreNiche(videos: VideoInfo[], channels: ChannelInfo[], now = n
   if (confidence === "not enough data") {
     const why = `Only ${n} verified videos (need ${MIN_VIDEOS_FOR_SCORE}+). Not scored.`;
     return {
+      metrics,
       sampleSize: n,
       confidence,
       windows,
@@ -215,5 +271,5 @@ export function scoreNiche(videos: VideoInfo[], channels: ChannelInfo[], now = n
     };
   }
 
-  return { sampleSize: n, confidence, windows, demand, competition, opportunity, freshness, money };
+  return { metrics, sampleSize: n, confidence, windows, demand, competition, opportunity, freshness, money };
 }

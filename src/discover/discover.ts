@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { collectNiche, NotCachedError, type CollectOptions } from "../niche/collectNiche.js";
-import { scoreNiche, type Confidence } from "../niche/scoreNiche.js";
+import { scoreNiche, type Confidence, type NicheMetrics, type WindowStat } from "../niche/scoreNiche.js";
 import { findTopics } from "../topics/findTopics.js";
 import { NICHE_TREE, PAGES_BY_LEVEL, type NicheGroup, type NicheLevel, type TreeNode } from "./nicheTree.js";
 
@@ -39,6 +39,13 @@ export type NodeRow = {
   medianViews: number | null;
   bestOutlier: { title: string; url: string; views: number; subscribers: number | null; ratio: number } | null;
   topTopics: string[];
+  // The numbers behind the scores
+  metrics: NicheMetrics | null;
+  windows: WindowStat[];
+  totalFound: number; // videos YouTube returned before filtering
+  removed: Record<string, number>; // removed videos by filter
+  topicCount: number; // topic ideas found (phrases used by 2+ channels)
+  channelOutliers: number; // videos with 3x+ their own channel's average views
 };
 
 /**
@@ -57,6 +64,7 @@ function emptyRow(node: TreeNode): NodeRow {
     checked: false, checkedAt: null, confidence: null, sampleSize: 0,
     demand: null, competition: null, opportunity: null, freshness: null, fit: null,
     medianViews: null, bestOutlier: null, topTopics: [],
+    metrics: null, windows: [], totalFound: 0, removed: {}, topicCount: 0, channelOutliers: 0,
   };
 }
 
@@ -94,6 +102,15 @@ async function rowFor(node: TreeNode, cacheOnly: boolean): Promise<{ row: NodeRo
         }
       : null,
     topTopics: topics.topics.slice(0, 3).map((t) => t.phrase),
+    metrics: scores.metrics,
+    windows: scores.windows,
+    totalFound: result.totalFound,
+    removed: result.removed.reduce<Record<string, number>>((acc, r) => {
+      acc[r.filter] = (acc[r.filter] ?? 0) + 1;
+      return acc;
+    }, {}),
+    topicCount: topics.topics.length,
+    channelOutliers: topics.outliers.length,
   };
   row.fit = fitScore(row);
   return { row, unitsUsed: result.unitsUsed };
