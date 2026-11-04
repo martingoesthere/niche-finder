@@ -10,6 +10,7 @@ import {
   type VideoInfo,
 } from "../youtube/youtubeApi.js";
 import { getBaselines, type ChannelBaseline } from "../youtube/enrich.js";
+import { GIANT_CHANNEL_SUBS } from "./scoreNiche.js";
 
 // Your reliability rule: score only with at least this many kept videos
 export const MIN_VIDEOS = 30;
@@ -35,6 +36,7 @@ type RawNicheData = {
 // so we also look at what normal videos in the niche get.
 export const TYPICAL_WINDOW_DAYS = { from: 90, to: 30 };
 export const TYPICAL_MAX_PAGES = 2;
+export const TYPICAL_ENOUGH = 20;
 
 type RawTypicalData = {
   pagesFetched: number;
@@ -276,7 +278,8 @@ export async function collectNiche(
           }
         }
         const { exactCount } = applyFilters(videos, channels, cleanQuery, targetCountries, language, format);
-        if (exactCount >= MIN_VIDEOS || !page.nextPageToken) break;
+        // 20+ ordinary uploads is plenty to correct the scores (10 are needed), so save the second page
+        if (exactCount >= TYPICAL_ENOUGH || !page.nextPageToken) break;
         pageToken = page.nextPageToken;
       }
       return { pagesFetched, unitsUsed, videos, channels };
@@ -308,7 +311,11 @@ export async function collectNiche(
   const keptChannelIds = new Set(videos.map((v) => v.channelId));
 
   // 4. Each kept channel's normal views, from its latest uploads (2 units per channel, saved 7 days)
-  const { baselines, unitsUsed: baselineUnits } = await getBaselines([...keptChannelIds], options.cacheOnly ?? false);
+  // Channels with 1M+ subscribers never count as outliers, so their normal views aren't needed
+  const needBaseline = raw.data.channels
+    .filter((c) => keptChannelIds.has(c.id) && (c.subscribers ?? 0) < GIANT_CHANNEL_SUBS)
+    .map((c) => c.id);
+  const { baselines, unitsUsed: baselineUnits } = await getBaselines(needBaseline, options.cacheOnly ?? false);
 
   return {
     query: cleanQuery,

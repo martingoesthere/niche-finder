@@ -142,6 +142,19 @@ export type CheckReport = {
 };
 
 // Spends quota: checks nodes that have no saved data yet, never going over the budget
+// Planning with the worst case (every page, every channel) stopped the daily run far too early:
+// a check really costs much less than its maximum. So we plan with the average cost of the
+// checks done so far (or 60% of the maximum before we know). A check can still cost more than
+// planned, but at most one check's maximum (about 700 units) over the budget, and the automatic
+// budget (7,000) leaves 3,000 of YouTube's 10,000 daily units free, so we can't hit the real limit.
+const observedCosts: Record<NicheLevel, number[]> = { niche: [], sub: [], micro: [] };
+
+export function expectedUnitsFor(level: NicheLevel): number {
+  const seen = observedCosts[level];
+  if (seen.length >= 3) return Math.ceil(seen.reduce((a, b) => a + b, 0) / seen.length);
+  return Math.ceil(maxUnitsFor(level) * 0.6);
+}
+
 export async function checkNodes(
   nodes: TreeNode[],
   budget: number,
@@ -157,10 +170,11 @@ export async function checkNodes(
       rows.push((await rowFor(node, true)).row);
       continue;
     }
-    const canAfford = unitsUsed + maxUnitsFor(node.level) <= budget;
+    const canAfford = unitsUsed + expectedUnitsFor(node.level) <= budget;
     try {
       const { row, unitsUsed: used } = await rowFor(node, !canAfford);
       unitsUsed += used;
+      if (used > 0) observedCosts[node.level].push(used); // a fresh check: learn its real cost
       rows.push(row);
       if (!row.checked) skipped.push(node.query);
       log(`${!row.checked ? "⏳" : used === 0 ? "📦" : "🌐"} ${node.query}: ${
