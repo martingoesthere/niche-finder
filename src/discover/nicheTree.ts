@@ -1,6 +1,9 @@
 // The ready-made niche tree: 10 niches > 3 sub-niches each > 3 micro-niches each.
 // These are IDEAS only (your rule: AI may suggest niche ideas, never scores).
 // Every score comes from real YouTube data when the app checks a node.
+// Search phrases must be words real titles use: "life before modern conveniences" and
+// "scams explained" found almost no videos in the first real run (Nov 4), so they became
+// "life before" and "scams".
 // Picked for profitable-niche traits: evergreen, faceless-friendly, many video
 // ideas, audiences in high-paying countries. Edit freely.
 
@@ -31,7 +34,7 @@ const RAW: Raw[] = [
     ["roman daily life", ["roman food", "roman baths", "roman houses"]],
     ["roman emperors", ["crazy roman emperors", "fall of rome", "roman assassinations"]],
   ]],
-  ["life before modern conveniences", "history", [
+  ["life before", "history", [
     ["life before electricity", ["before refrigerators", "history of candles", "before air conditioning"]],
     ["history of hygiene", ["history of toilets", "history of soap", "history of bathing"]],
     ["history of food", ["food preservation history", "victorian food", "ancient bread"]],
@@ -51,7 +54,7 @@ const RAW: Raw[] = [
     ["frugal living", ["frugal living tips", "grocery savings", "minimalism money"]],
     ["side hustles", ["side hustles from home", "online side hustles", "side hustle ideas"]],
   ]],
-  ["scams explained", "business & tech", [
+  ["scams", "business & tech", [
     ["online scams", ["phone scams", "crypto scams", "romance scams"]],
     ["identity theft", ["identity theft protection", "data breaches", "credit freeze"]],
     ["famous frauds", ["ponzi schemes", "corporate fraud", "con artists"]],

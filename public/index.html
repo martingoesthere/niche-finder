@@ -327,6 +327,7 @@
 
   function summarySentence(r) {
     const m = r.metrics;
+    if (!m.videos) return `No verified videos matched every word of “${r.query}” yet, so there's nothing to grade.`;
     const typicalOk = m.typicalVideos >= 10;
     const parts = [
       typicalOk

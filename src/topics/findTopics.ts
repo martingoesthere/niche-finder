@@ -11,6 +11,8 @@ export const RECENT_DAYS = 90; // "recent" = published in the last 90 days
 export const MIN_TOPIC_CHANNELS = 2; // a topic must work for at least 2 different channels
 export const REPEATED_CHANNELS = 3; // 3+ channels = "repeated success"
 export const MOMENTUM_FACTOR = 1.5; // 1.5x the niche's median views per day = momentum
+export const MIN_SINGLE_WORD_CHANNELS = 3; // a one-word idea needs 3+ channels (two-word ideas need 2+)
+export const GAP_MIN_VIDEOS = 3; // a gap needs at least 3 videos, or any small idea would count
 const DAY_MS = 86_400_000;
 
 // Extra title words that never describe a topic
@@ -23,6 +25,14 @@ const TITLE_STOP_WORDS = new Set([
   "getting", "over", "people", "actually", "keep", "keeping", "thing", "stop", "doing", "now", "worth",
   "make", "made", "way", "still", "even", "without", "into", "off", "than", "then", "go", "going",
   "know", "want", "like", "look", "see", "watch", "time", "day", "year", "month", "said", "say",
+  // generic words found in the first real run (Nov 4): they don't describe a topic on their own
+  "ignore", "never", "explain", "explains", "behind", "mind", "read", "changed", "change", "life", "tried",
+  "try", "minute", "minutes", "everyone", "anyone", "someone", "until", "entire", "whole", "started", "start",
+  "customer", "history", "historical", "truth", "real", "really", "secret", "secrets", "inside", "ever",
+  "new", "old", "big", "good", "bad", "best", "worst", "first", "last", "next", "thing", "things", "way",
+  "ways", "why", "true", "facts", "fact", "story", "stories", "simple", "easy", "hard", "complete", "ultimate",
+  "beginner", "beginners", "guide", "step", "here", "what", "happened", "happens", "happen", "work", "works",
+  "actually", "nobody", "people", "man", "men", "woman", "women", "world", "most", "dark", "shocking",
 ]);
 
 // ---------- Shapes ----------
@@ -136,7 +146,8 @@ export function findTopics(result: NicheResult, now = new Date()): TopicReport {
   let topics: TopicIdea[] = [];
   for (const [phrase, videos] of byPhrase) {
     const channelCount = new Set(videos.map((s) => s.video.channelId)).size;
-    if (channelCount < MIN_TOPIC_CHANNELS) continue;
+    const words = phrase.split(" ").length;
+    if (channelCount < (words === 1 ? MIN_SINGLE_WORD_CHANNELS : MIN_TOPIC_CHANNELS)) continue;
 
     const medianViews = median(videos.map((s) => s.video.views)) ?? 0;
     const medianViewsPerDay = median(videos.map((s) => s.viewsPerDay)) ?? 0;
@@ -148,7 +159,7 @@ export function findTopics(result: NicheResult, now = new Date()): TopicReport {
     if (bestOutlierRatio !== null && bestOutlierRatio >= OUTLIER_MIN_RATIO) tags.push("outlier");
     if (channelCount >= REPEATED_CHANNELS) tags.push("repeated");
     if (medianViewsPerDay >= nicheMedianViewsPerDay * MOMENTUM_FACTOR) tags.push("momentum");
-    if (medianViews >= nicheMedianViews && recentVideos <= 1) tags.push("gap");
+    if (videos.length >= GAP_MIN_VIDEOS && medianViews >= nicheMedianViews && recentVideos <= 1) tags.push("gap");
 
     topics.push({
       phrase,
@@ -175,7 +186,10 @@ export function findTopics(result: NicheResult, now = new Date()): TopicReport {
   // Rank: most signals first, then most channels, then most views
   topics.sort(
     (a, b) =>
-      b.tags.length - a.tags.length || b.channelCount - a.channelCount || b.medianViews - a.medianViews,
+      b.tags.length - a.tags.length ||
+      Number(b.phrase.includes(" ")) - Number(a.phrase.includes(" ")) || // two-word ideas first: easier to turn into a title
+      b.channelCount - a.channelCount ||
+      b.medianViews - a.medianViews,
   );
 
   // 4. Creator tags that 2+ different channels used (exactly as creators typed them, lowercased)
