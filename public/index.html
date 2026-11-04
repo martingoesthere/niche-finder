@@ -88,6 +88,11 @@
     body.terse .why { display: none; }
     .math { font-size: 14px; color: var(--muted); margin-top: 10px; font-variant-numeric: tabular-nums; }
     .dot { font-size: 0.85em; line-height: 1; }
+    .mq { font-size: 13px; color: var(--muted); margin-top: 2px; }
+    .explain { margin: 10px 0 14px; }
+    .explain-row { display: grid; grid-template-columns: 110px 1fr; gap: 0 12px; padding: 8px 0; border-top: 1px solid var(--line); }
+    .explain-row b { grid-row: span 3; }
+    .explain-row span { grid-column: 2; }
     .topicform { display: grid; grid-template-columns: max-content 1fr; gap: 2px 10px; margin: 8px 0 0; font-size: 15px; }
     .topicform dt { color: var(--muted); }
     .topicform dd { margin: 0; font-weight: 700; }
@@ -323,11 +328,34 @@
     return parts.join(", ") + ".";
   }
 
+  // The four scores in plain words (the lemonade stand idea)
+  const PLAIN = {
+    Demand: { q: "Do lots of people watch this?", good: "High is good: lots of viewers", stand: "Are people thirsty on this street?" },
+    Competition: { q: "Are the other channels huge?", good: "Low is good: the other channels are small", stand: "Is there a giant lemonade store next door?" },
+    Opportunity: { q: "Do small channels get lots of views here?", good: "High is good: small channels break through", stand: "Do kids with tiny stands sell a lot here?" },
+    Freshness: { q: "Are brand-new channels getting views?", good: "High is good: new channels succeed (less than 6 months old)", stand: "Is a stand that opened last month already selling?" },
+  };
+
+  function explainScores() {
+    const rows = Object.entries(PLAIN).map(([name, p]) =>
+      el("div", { class: "explain-row" },
+        el("b", { textContent: name }),
+        el("span", { textContent: p.q }),
+        el("span", { class: "muted", textContent: `🍋 ${p.stand}` }),
+        el("span", { class: "muted", textContent: p.good })));
+    return el("details", { class: "more explain", open: true },
+      el("summary", { textContent: "What the 4 scores mean (think of a lemonade stand)" }),
+      el("p", { class: "small muted", style: "margin-bottom:8px", textContent: "Before opening a lemonade stand, you'd check the street. The app checks a YouTube topic the same way:" }),
+      ...rows,
+      el("p", { class: "small", style: "margin-top:10px", textContent: "The perfect topic: lots of viewers, small channels, small channels getting views, and new channels getting views. Competition is the only one where a low number is good." }));
+  }
+
   function meter(name, score, lowerIsBetter) {
     const b = band(score, lowerIsBetter);
     const fillCls = b.cls ? "bg-" + b.cls : "";
     return el("div", { class: "meter" },
       el("div", { class: "top" }, el("span", { textContent: name }), el("span", {}, dot(dotFor(score, lowerIsBetter)), " ", el("span", { class: "band " + b.cls, textContent: b.word }), ` ${score ?? ""}`)),
+      PLAIN[name] ? el("div", { class: "mq", textContent: PLAIN[name].q }) : null,
       el("div", { class: "track", role: "img", ariaLabel: `${name}: ${b.word}${score === null ? "" : ", " + score + " of 100"}` },
         score === null ? null : el("i", { class: fillCls, style: `width:${score}%` })),
     );
@@ -355,7 +383,7 @@
         el("span", { class: "muted small", textContent: `Based on ${m.videos} verified videos from ${m.channels} channels, collected ${new Date(r.checkedAt).toLocaleDateString()}.` }),
         terseToggle()),
       el("div", { class: "grid2" },
-        scoreBox("Demand", r.demand, "Do people watch this? Higher is better.", false, [
+        scoreBox("Demand", r.demand, `${PLAIN.Demand.q} ${PLAIN.Demand.good}.`, false, [
           metric(`Top videos, median views: ${num(m.medianViews)}`, "The middle of the most-viewed videos YouTube shows for this topic. These are the winners."),
           m.typicalVideos
             ? metric(`Ordinary recent uploads, median views: ${num(m.typicalMedianViews)} (${m.typicalVideos} videos, 30–90 days old)`,
@@ -367,12 +395,12 @@
           metric(`Videos from the last 3 months: median ${num(w(3)?.medianViews)} (${w(3)?.videos ?? 0} videos). Last 6: ${num(w(6)?.medianViews)} (${w(6)?.videos ?? 0}). Last 12: ${num(w(12)?.medianViews)} (${w(12)?.videos ?? 0}).`,
             "If recent videos still do well, the niche is alive now, not only in the past."),
         ]),
-        scoreBox("Competition", r.competition, "How big are the channels you'd compete with? Lower is easier.", true, [
+        scoreBox("Competition", r.competition, `${PLAIN.Competition.q} ${PLAIN.Competition.good}.`, true, [
           metric(`Median subscribers: ${num(m.medianSubscribers)}`, "The size of a normal channel here. 5M is hard to beat; 50K gives a new channel a real chance."),
           metric(`Giant channels (1M+ subscribers): ${m.giantChannels} of ${m.channelsWithPublicSubs} (${pct(m.giantChannels, m.channelsWithPublicSubs) ?? "—"}%)`, "Giants take the top spots in search and suggestions. Fewer giants means more room for you."),
           metric(`Different channels: ${m.channels}`, "Many channels means lots of people succeed here. Very few means one or two creators own it."),
         ]),
-        scoreBox("Opportunity", r.opportunity, "Can a small channel win here? Higher is better.", false, [
+        scoreBox("Opportunity", r.opportunity, `${PLAIN.Opportunity.q} ${PLAIN.Opportunity.good}.`, false, [
           r.corrected?.opportunity
             ? metric(`${m.typicalBreakouts} of ${m.typicalSmallChannelVideos} ordinary recent uploads from channels under 1M subs got more than double their subscribers in views (${pct(m.typicalBreakouts, m.typicalSmallChannelVideos) ?? "—"}%)`,
                 "This is the score. It counts every small channel posting here, including the ones that didn't break out, so it shows your real chances.")
@@ -387,7 +415,7 @@
                 el("div", { class: "why", textContent: "Your best video to study first." }))
             : null,
         ]),
-        scoreBox("Freshness", r.freshness, "Are new channels making it? Higher is better.", false, [
+        scoreBox("Freshness", r.freshness, `${PLAIN.Freshness.q} ${PLAIN.Freshness.good}.`, false, [
           metric(`Channels less than 6 months old: ${m.newChannels} of ${m.channels} (${pct(m.newChannels, m.channels) ?? "—"}%)`, "If new channels succeed, you can too. If none do, the door may be closed."),
           metric(`Videos made by those new channels: ${m.newChannelVideos} of ${m.videos} (${pct(m.newChannelVideos, m.videos) ?? "—"}%)`, "How much space new creators really get in the results."),
           metric(`Uploads in the last 90 days: ${m.videosLast90Days} of ${m.videos}`, "Few recent uploads with strong views is a gap: people want videos, but not enough are being made."),
@@ -514,6 +542,7 @@
           el("div", {}, el("h2", { textContent: title }),
             el("p", { class: "muted small", textContent: "Each one is ranked by real numbers. The meters show High, Medium or Low; open “Show all numbers” for the details and why each one matters." }), legend()),
           el("label", { class: "small" }, "Sort by ", sortSelect)),
+        explainScores(),
         ...top,
         list,
       );
@@ -762,6 +791,7 @@
         el("div", { class: "bar-row" },
           el("div", {}, el("h2", { textContent: `Your top ${rep.picks.length} choices` }), legend(),
             el("p", { class: "muted small", textContent: "Think of a school: the niche is the school (medieval), the sub-niche is a classroom (medieval peasants), and the micro-niche is one desk (what peasants ate). Smaller topics are easier for a new channel to stand out in." }),
+            explainScores(),
             el("p", { class: "muted small", textContent: "Ranked by Fit. Each one shows its best sub-niche and micro-niche (once checked), the key numbers, and its top video ideas." }))),
         ...rep.picks.map(pickCard),
         ...(waiting.length ? [el("div", { class: "panel muted", textContent: `Not checked yet: ${waiting.map((n) => n.query).join(", ")}. They'll be added automatically tomorrow.` })] : []),
