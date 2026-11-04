@@ -87,6 +87,9 @@
     .why { font-size: 14px; color: var(--muted); margin-top: 2px; }
     body.terse .why { display: none; }
     .math { font-size: 14px; color: var(--muted); margin-top: 10px; font-variant-numeric: tabular-nums; }
+    .dot { font-size: 0.85em; line-height: 1; }
+    .fitnum .dot { font-size: 26px; vertical-align: 4px; }
+    .legend { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: 6px; color: var(--muted); }
     .chip { display: inline-block; border: 1px solid var(--line); border-radius: 99px; padding: 1px 10px; font-size: 14px; margin: 3px 6px 0 0; }
 
     /* Ideas */
@@ -156,6 +159,8 @@
       <dd>70 to 100 = High (or Hard for competition). 40 to 69 = Medium. 0 to 39 = Low (or Easy for competition). The small marks on each meter sit at 40 and 70.</dd>
       <dt>Confidence</dt>
       <dd>Low = 30 to 49 verified videos, medium = 50 to 99, high = 100 or more. Below 30 videos the app gives no score.</dd>
+      <dt>Colored circles</dt>
+      <dd>🟢 Good, worth looking at (70 or more; for Competition, under 40). 🟡 Okay, check the details (40 to 69). 🔴 Weak, probably skip (under 40; for Competition, 70 or more). ⚪ Not enough data to grade. Next to the video count, the circle shows confidence: 🟢 high, 🟡 medium, 🔴 low.</dd>
       <dt>Where every number comes from</dt>
       <dd><b>Straight from YouTube</b> (YouTube Data API v3, nothing changed): views, likes, comment counts, upload dates, video length, category, “made for kids”, language tags, creator tags, channel subscribers, channel start date, channel country, each channel's latest uploads, and top comments.</dd>
       <dd><b>Calculated by the app</b> (formulas above): medians, percentages, the four scores, Fit, outlier ratios, topic ideas and viewer requests. Every one of them can be checked by hand from the raw data.</dd>
@@ -226,6 +231,25 @@
     if (score === null) return { word: "—", cls: "" };
     if (lowerIsBetter) return score >= 70 ? { word: "Hard", cls: "low" } : score >= 40 ? { word: "Medium", cls: "mid" } : { word: "Easy", cls: "high" };
     return score >= 70 ? { word: "High", cls: "high" } : score >= 40 ? { word: "Medium", cls: "mid" } : { word: "Low", cls: "low" };
+  }
+
+  // Colored circles: is this worth looking at?
+  // 🟢 70+ (or under 40 for competition) · 🟡 40 to 69 · 🔴 under 40 (or 70+ for competition) · ⚪ no data
+  const DOT_TEXT = { "🟢": "Good: worth looking at", "🟡": "Okay: check the details", "🔴": "Weak: probably skip", "⚪": "No grade: not enough data" };
+  function dotFor(score, lowerIsBetter = false) {
+    if (score === null || score === undefined) return "⚪";
+    if (lowerIsBetter) return score < 40 ? "🟢" : score < 70 ? "🟡" : "🔴";
+    return score >= 70 ? "🟢" : score >= 40 ? "🟡" : "🔴";
+  }
+  function confidenceDot(c) {
+    return c === "high" ? "🟢" : c === "medium" ? "🟡" : c === "low" ? "🔴" : "⚪";
+  }
+  function dot(symbol) {
+    return el("span", { class: "dot", title: DOT_TEXT[symbol], ariaLabel: DOT_TEXT[symbol], textContent: symbol });
+  }
+  function legend() {
+    return el("div", { class: "legend small" },
+      ...["🟢", "🟡", "🔴", "⚪"].map((d) => el("span", {}, dot(d), " ", d === "🟢" ? "Good, worth looking at" : d === "🟡" ? "Okay, check the details" : d === "🔴" ? "Weak, probably skip" : "Not enough data")));
   }
 
   const LEVEL = { niche: "niche", sub: "sub-niche", micro: "micro-niche" };
@@ -300,7 +324,7 @@
     const b = band(score, lowerIsBetter);
     const fillCls = b.cls ? "bg-" + b.cls : "";
     return el("div", { class: "meter" },
-      el("div", { class: "top" }, el("span", { textContent: name }), el("span", {}, el("span", { class: "band " + b.cls, textContent: b.word }), ` ${score ?? ""}`)),
+      el("div", { class: "top" }, el("span", { textContent: name }), el("span", {}, dot(dotFor(score, lowerIsBetter)), " ", el("span", { class: "band " + b.cls, textContent: b.word }), ` ${score ?? ""}`)),
       el("div", { class: "track", role: "img", ariaLabel: `${name}: ${b.word}${score === null ? "" : ", " + score + " of 100"}` },
         score === null ? null : el("i", { class: fillCls, style: `width:${score}%` })),
     );
@@ -313,7 +337,7 @@
   function scoreBox(title, score, question, lowerIsBetter, metrics) {
     const b = band(score, lowerIsBetter);
     return el("div", { class: "box" },
-      el("h3", {}, el("span", { textContent: title }), el("span", { class: b.cls, textContent: score === null ? "not scored" : `${b.word} · ${score}` })),
+      el("h3", {}, el("span", {}, dot(dotFor(score, lowerIsBetter)), " ", title), el("span", { class: b.cls, textContent: score === null ? "not scored" : `${b.word} · ${score}` })),
       el("div", { class: "q", textContent: question }),
       ...metrics,
     );
@@ -396,7 +420,9 @@
         r.checked && r.metrics ? el("p", { class: "summary", textContent: summarySentence(r) }) : el("p", { class: "summary muted", textContent: "No YouTube data yet. Use the check button above." }),
         r.topTopics.length ? el("div", {}, el("span", { class: "small muted", textContent: "Popular topics: " }), ...r.topTopics.map((t) => el("span", { class: "chip", textContent: t }))) : null,
       ),
-      el("div", { class: "fitbox" }, el("div", { class: "fitnum", textContent: fitText }), el("div", { class: "tiny muted", textContent: fitNote })),
+      el("div", { class: "fitbox" }, el("div", { class: "fitnum" }, dot(dotFor(r.checked ? r.fit : null)), " ", String(fitText)),
+        el("div", { class: "tiny muted", textContent: fitNote }),
+        r.checked && r.fit !== null ? el("div", { class: "tiny muted" }, dot(confidenceDot(r.confidence)), ` ${r.sampleSize} videos`) : null),
     );
 
     if (r.checked) {
@@ -483,7 +509,7 @@
       view.replaceChildren(
         el("div", { class: "bar-row" },
           el("div", {}, el("h2", { textContent: title }),
-            el("p", { class: "muted small", textContent: "Each one is ranked by real numbers. The meters show High, Medium or Low; open “Show all numbers” for the details and why each one matters." })),
+            el("p", { class: "muted small", textContent: "Each one is ranked by real numbers. The meters show High, Medium or Low; open “Show all numbers” for the details and why each one matters." }), legend()),
           el("label", { class: "small" }, "Sort by ", sortSelect)),
         ...top,
         list,
@@ -587,7 +613,7 @@
         const items = el("ul", { class: "vids" });
         s.proof.forEach((p) => items.append(el("li", {}, vlink(p.label, p.url), el("div", { class: "m", textContent: p.detail }))));
         scoreList.append(el("div", { class: "box" },
-          el("h3", {}, el("span", { textContent: s.name }), el("span", { class: b.cls, textContent: s.score === null ? "not scored" : `${b.word} · ${s.score}` })),
+          el("h3", {}, el("span", {}, dot(dotFor(s.score, lower)), " ", s.name), el("span", { class: b.cls, textContent: s.score === null ? "not scored" : `${b.word} · ${s.score}` })),
           el("div", { class: "q", textContent: s.meaning }),
           el("div", { class: "small", textContent: s.explanation }),
           s.proof.length ? items : null));
@@ -662,8 +688,9 @@
         el("div", { class: "muted small", textContent: `${p.niche.group} · scores shown for “${f.query}” (${LEVEL[f.level]})` }),
         f.metrics ? el("p", { class: "summary", textContent: summarySentence(f) }) : null,
       ),
-      el("div", { class: "fitbox" }, el("div", { class: "fitnum", textContent: f.fit ?? "—" }),
-        el("div", { class: "tiny muted", textContent: f.fit === null ? `not enough videos (${f.sampleSize} of 30)` : `Fit · ${f.confidence} confidence` })),
+      el("div", { class: "fitbox" }, el("div", { class: "fitnum" }, dot(dotFor(f.fit)), " ", String(f.fit ?? "—")),
+        el("div", { class: "tiny muted", textContent: f.fit === null ? `not enough videos (${f.sampleSize} of 30)` : `Fit · ${f.confidence} confidence` }),
+        f.fit !== null ? el("div", { class: "tiny muted" }, dot(confidenceDot(f.confidence)), ` ${f.sampleSize} videos`) : null),
     );
     if (f.checked) card.append(el("div", { class: "meters" },
       meter("Demand", f.demand), meter("Competition", f.competition, true), meter("Opportunity", f.opportunity), meter("Freshness", f.freshness)));
@@ -724,10 +751,10 @@
         el("p", { class: "muted small", style: "margin-bottom:12px", textContent: `Updated ${new Date(rep.builtAt).toLocaleString()}. YouTube units used today: ${num(rep.unitsUsedToday)} of ${num(rep.dailyLimit)} (automatic checks stop at ${num(rep.dailyAutoCap)}).` }),
         ...rep.notes.map((n) => el("div", { class: "notice", textContent: n })),
         el("div", { class: "bar-row" },
-          el("div", {}, el("h2", { textContent: `Your top ${rep.picks.length} choices` }),
+          el("div", {}, el("h2", { textContent: `Your top ${rep.picks.length} choices` }), legend(),
             el("p", { class: "muted small", textContent: "Ranked by Fit. Each one shows its best sub-niche and micro-niche (once checked), the key numbers, and its top video ideas." }))),
         ...rep.picks.map(pickCard),
-        waiting.length ? el("div", { class: "panel muted", textContent: `Not checked yet: ${waiting.map((n) => n.query).join(", ")}. They'll be added automatically tomorrow.` }) : null,
+        ...(waiting.length ? [el("div", { class: "panel muted", textContent: `Not checked yet: ${waiting.map((n) => n.query).join(", ")}. They'll be added automatically tomorrow.` })] : []),
         ...(rep.ideas ? ideasSections(rep.ideas, { maxIdeas: 10 }).map((sec, i) => {
           if (i === 0) sec.children[0].textContent = `All video ideas for #1: “${top.focus.query}”`;
           return sec;
