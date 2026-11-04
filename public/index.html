@@ -88,6 +88,9 @@
     body.terse .why { display: none; }
     .math { font-size: 14px; color: var(--muted); margin-top: 10px; font-variant-numeric: tabular-nums; }
     .dot { font-size: 0.85em; line-height: 1; }
+    .topicform { display: grid; grid-template-columns: max-content 1fr; gap: 2px 10px; margin: 8px 0 0; font-size: 15px; }
+    .topicform dt { color: var(--muted); }
+    .topicform dd { margin: 0; font-weight: 700; }
     .fitnum .dot { font-size: 26px; vertical-align: 4px; }
     .legend { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: 6px; color: var(--muted); }
     .chip { display: inline-block; border: 1px solid var(--line); border-radius: 99px; padding: 1px 10px; font-size: 14px; margin: 3px 6px 0 0; }
@@ -684,13 +687,19 @@
     card.append(
       el("div", { class: "rank", textContent: p.rank }),
       el("div", {},
-        el("h3", { class: "name", textContent: path.map((r) => r.query).join(" › ") }),
-        el("div", { class: "muted small", textContent: `${p.niche.group} · scores shown for “${f.query}” (${LEVEL[f.level]})` }),
+        el("h3", { class: "name", textContent: f.query }),
+        el("dl", { class: "topicform" },
+          el("dt", { textContent: "Big topic (niche):" }), el("dd", { textContent: p.niche.query }),
+          el("dt", { textContent: "Smaller topic (sub-niche):" }), el("dd", { textContent: p.bestSub ? p.bestSub.query : "not checked yet" }),
+          el("dt", { textContent: "Even smaller topic (micro-niche):" }), el("dd", { textContent: p.bestMicro ? p.bestMicro.query : (p.bestSub ? "not checked yet" : "—") }),
+          el("dt", { textContent: "Category:" }), el("dd", { textContent: p.niche.group }),
+          el("dt", { textContent: "Grades below are for:" }), el("dd", { textContent: `“${f.query}”` }),
+        ),
         f.metrics ? el("p", { class: "summary", textContent: summarySentence(f) }) : null,
       ),
       el("div", { class: "fitbox" }, el("div", { class: "fitnum" }, dot(dotFor(f.fit)), " ", String(f.fit ?? "—")),
-        el("div", { class: "tiny muted", textContent: f.fit === null ? `not enough videos (${f.sampleSize} of 30)` : `Fit · ${f.confidence} confidence` }),
-        f.fit !== null ? el("div", { class: "tiny muted" }, dot(confidenceDot(f.confidence)), ` ${f.sampleSize} videos`) : null),
+        el("div", { class: "tiny muted", textContent: f.fit === null ? `not enough videos (${f.sampleSize} of 30)` : "grade out of 100" }),
+        f.fit !== null ? el("div", { class: "tiny muted" }, dot(confidenceDot(f.confidence)), ` how sure: ${f.confidence} (${f.sampleSize} videos)`) : null),
     );
     if (f.checked) card.append(el("div", { class: "meters" },
       meter("Demand", f.demand), meter("Competition", f.competition, true), meter("Opportunity", f.opportunity), meter("Freshness", f.freshness)));
@@ -752,6 +761,7 @@
         ...rep.notes.map((n) => el("div", { class: "notice", textContent: n })),
         el("div", { class: "bar-row" },
           el("div", {}, el("h2", { textContent: `Your top ${rep.picks.length} choices` }), legend(),
+            el("p", { class: "muted small", textContent: "Think of a school: the niche is the school (medieval), the sub-niche is a classroom (medieval peasants), and the micro-niche is one desk (what peasants ate). Smaller topics are easier for a new channel to stand out in." }),
             el("p", { class: "muted small", textContent: "Ranked by Fit. Each one shows its best sub-niche and micro-niche (once checked), the key numbers, and its top video ideas." }))),
         ...rep.picks.map(pickCard),
         ...(waiting.length ? [el("div", { class: "panel muted", textContent: `Not checked yet: ${waiting.map((n) => n.query).join(", ")}. They'll be added automatically tomorrow.` })] : []),
