@@ -48,6 +48,9 @@
     .step.now::before { border-color: var(--accent); color: var(--accent); }
     .step.done:hover b { text-decoration: underline; }
 
+    .floatbtn { position: fixed; right: 20px; bottom: 20px; z-index: 5; box-shadow: 0 4px 14px rgba(15, 123, 108, .35); padding: 12px 18px; }
+    .floatbtn.hidden { display: none; }
+    .endbar { text-align: center; margin: 22px 0 8px; }
     .welcome { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 20px 22px; margin: 22px 0 8px; }
     .welcome p { max-width: 64ch; margin-top: 6px; }
     .welcome .btn.big { font-size: 19px; padding: 14px 26px; margin: 14px 0 8px; }
@@ -156,6 +159,8 @@
     <button class="btn big" id="findBtn" type="button">Find my best niches</button>
     <p class="small muted" id="findNote">The first time takes 2 to 3 minutes. Niches already checked stay saved for 7 days, so clicking again is free and continues where it stopped (up to 7,000 YouTube units a day).</p>
   </section>
+
+  <button class="btn floatbtn hidden" id="floatBtn" type="button" aria-label="Find my best niches again">🔄 Find again</button>
 
   <nav class="trail" id="trail" aria-label="Where you are"></nav>
   <div id="view"></div>
@@ -514,6 +519,7 @@
   async function showList(message) {
     ideasFor = null;
     inReport = false;
+    document.getElementById("floatBtn").classList.add("hidden");
     renderTrail();
     view.replaceChildren(el("p", { class: "muted", textContent: "Loading…" }));
     const parent = crumbs[crumbs.length - 1];
@@ -684,6 +690,7 @@
   async function showIdeas(target) {
     ideasFor = target;
     inReport = false;
+    document.getElementById("floatBtn").classList.add("hidden");
     renderTrail();
     view.replaceChildren(el("p", { class: "muted", textContent: `Loading video ideas for “${target.label}”…` }));
     window.scrollTo({ top: 0 });
@@ -781,16 +788,28 @@
   async function showReport() {
     if (reportRunning) return; // one request at a time
     reportRunning = true;
+    window.scrollTo({ top: 0, behavior: "smooth" });
     const btn = document.getElementById("findBtn");
+    const floatBtn = document.getElementById("floatBtn");
     btn.disabled = true;
     btn.textContent = "Checking YouTube…";
+    floatBtn.classList.add("hidden");
     try {
       await runReport();
     } finally {
       reportRunning = false;
       btn.disabled = false;
       btn.textContent = "Find my best niches again";
+      floatBtn.classList.remove("hidden");
     }
+  }
+
+  // The same button at the end of the results
+  function againButton() {
+    const b = el("button", { type: "button", class: "btn big", textContent: "🔄 Find my best niches again" });
+    b.addEventListener("click", showReport);
+    return el("div", { class: "endbar" }, b,
+      el("p", { class: "small muted", textContent: "Saved niches are free for 7 days. A new click continues with anything not checked yet." }));
   }
 
   async function runReport() {
@@ -825,6 +844,7 @@
           if (i === 0) sec.children[0].textContent = `All video ideas for #1: “${top.focus.query}”`;
           return sec;
         }) : []),
+        againButton(),
       );
     } catch (err) {
       view.replaceChildren(el("div", { class: "notice error", textContent: err.message }));
@@ -941,6 +961,7 @@
   });
 
   document.getElementById("findBtn").addEventListener("click", showReport);
+  document.getElementById("floatBtn").addEventListener("click", showReport);
   view.replaceChildren(el("p", { class: "muted", textContent: "Click “Find my best niches” to start." }));
 </script>
 </body>
