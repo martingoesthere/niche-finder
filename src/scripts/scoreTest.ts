@@ -23,7 +23,7 @@ function printScore(s: Score) {
 
 try {
   const result = await collectNiche(query, { region: "US", language: "en" });
-  const scores = scoreNiche(result.exactVideos, result.channels);
+  const scores = scoreNiche(result.exactVideos, result.channels, new Date(), result.typical);
 
   console.log(`📊 Niche: "${result.query}" | ${result.targetCountries.join(", ")} | last ${result.months} months`);
   console.log(

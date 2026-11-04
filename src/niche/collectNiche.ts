@@ -30,6 +30,28 @@ type RawNicheData = {
   channels: ChannelInfo[];
 };
 
+// Ordinary recent uploads: newest first (not most-viewed), uploaded 30 to 90 days ago.
+// They fix the "only winners" bias: search by views only shows the most-watched videos,
+// so we also look at what normal videos in the niche get.
+export const TYPICAL_WINDOW_DAYS = { from: 90, to: 30 };
+export const TYPICAL_MAX_PAGES = 2;
+
+type RawTypicalData = {
+  pagesFetched: number;
+  unitsUsed: number;
+  videos: VideoInfo[];
+  channels: ChannelInfo[];
+};
+
+export type TypicalSample = {
+  savedAt: string;
+  windowDays: { from: number; to: number };
+  pagesFetched: number;
+  totalFound: number; // videos YouTube returned
+  videos: VideoInfo[]; // exact matches that passed every filter (the same filters as the top sample)
+  channels: ChannelInfo[];
+};
+
 // What the rest of the app gets: filtered data + proof of what was removed
 export type NicheResult = {
   query: string;
@@ -53,6 +75,8 @@ export type NicheResult = {
   channels: ChannelInfo[]; // channels of the kept videos
   // Each kept channel's normal views, from its latest uploads (missing = not checked yet)
   baselines: Record<string, ChannelBaseline>;
+  // Ordinary recent uploads (null = not collected yet, e.g. data saved before this existed)
+  typical: TypicalSample | null;
 };
 
 export type CollectOptions = {
@@ -210,7 +234,67 @@ export async function collectNiche(
     };
   });
 
-  // 2. Run the filters on the full raw data (free)
+  // 2. Ordinary recent uploads (newest first, 30-90 days old), same filters as the top videos
+  const typicalKey = `typical:v1:${language}:${region}:${format}:${targetCountries.join("-")}:${cleanQuery}`;
+  let typical: TypicalSample | null = null;
+  let typicalUnits = 0;
+  if (!options.cacheOnly || (await hasCache(typicalKey, options.maxAgeHours ?? 24))) {
+    const rawTypical = await cached<RawTypicalData>(typicalKey, options.maxAgeHours ?? 24, async () => {
+      const now = Date.now();
+      const publishedAfter = new Date(now - TYPICAL_WINDOW_DAYS.from * 86_400_000);
+      const publishedBefore = new Date(now - TYPICAL_WINDOW_DAYS.to * 86_400_000);
+      const videos: VideoInfo[] = [];
+      const channels: ChannelInfo[] = [];
+      const seenVideos = new Set<string>();
+      const seenChannels = new Set<string>();
+      let pageToken: string | undefined;
+      let pagesFetched = 0;
+      let unitsUsed = 0;
+      while (pagesFetched < TYPICAL_MAX_PAGES) {
+        const page = await searchVideos(cleanQuery, {
+          publishedAfter,
+          publishedBefore,
+          language,
+          regionCode: region,
+          order: "date",
+          maxResults: 50,
+          pageToken,
+        });
+        pagesFetched++;
+        unitsUsed += 100;
+        const newIds = page.ids.filter((id) => !seenVideos.has(id));
+        newIds.forEach((id) => seenVideos.add(id));
+        if (newIds.length) {
+          const newVideos = await getVideos(newIds);
+          unitsUsed += Math.ceil(newIds.length / 50);
+          videos.push(...newVideos);
+          const newChannelIds = [...new Set(newVideos.map((v) => v.channelId))].filter((id) => !seenChannels.has(id));
+          newChannelIds.forEach((id) => seenChannels.add(id));
+          if (newChannelIds.length) {
+            channels.push(...(await getChannels(newChannelIds)));
+            unitsUsed += Math.ceil(newChannelIds.length / 50);
+          }
+        }
+        const { exactCount } = applyFilters(videos, channels, cleanQuery, targetCountries, language, format);
+        if (exactCount >= MIN_VIDEOS || !page.nextPageToken) break;
+        pageToken = page.nextPageToken;
+      }
+      return { pagesFetched, unitsUsed, videos, channels };
+    });
+    const f = applyFilters(rawTypical.data.videos, rawTypical.data.channels, cleanQuery, targetCountries, language, format);
+    const keptIds = new Set(f.exactType.kept.map((v) => v.channelId));
+    typical = {
+      savedAt: rawTypical.savedAt,
+      windowDays: TYPICAL_WINDOW_DAYS,
+      pagesFetched: rawTypical.data.pagesFetched,
+      totalFound: rawTypical.data.videos.length,
+      videos: f.exactType.kept,
+      channels: rawTypical.data.channels.filter((c) => keptIds.has(c.id)),
+    };
+    typicalUnits = rawTypical.fromCache ? 0 : rawTypical.data.unitsUsed;
+  }
+
+  // 3. Run the filters on the full raw data (free)
   const { relevance, exact, broad, exactType, broadType } = applyFilters(
     raw.data.videos,
     raw.data.channels,
@@ -223,7 +307,7 @@ export async function collectNiche(
   const videos = [...exactType.kept, ...broadType.kept];
   const keptChannelIds = new Set(videos.map((v) => v.channelId));
 
-  // 3. Each kept channel's normal views, from its latest uploads (2 units per channel, saved 7 days)
+  // 4. Each kept channel's normal views, from its latest uploads (2 units per channel, saved 7 days)
   const { baselines, unitsUsed: baselineUnits } = await getBaselines([...keptChannelIds], options.cacheOnly ?? false);
 
   return {
@@ -235,7 +319,7 @@ export async function collectNiche(
     format,
     fromCache: raw.fromCache,
     savedAt: raw.savedAt,
-    unitsUsed: (raw.fromCache ? 0 : raw.data.unitsUsed) + baselineUnits,
+    unitsUsed: (raw.fromCache ? 0 : raw.data.unitsUsed) + baselineUnits + typicalUnits,
     pagesFetched: raw.data.pagesFetched,
     stoppedBecause: raw.data.stoppedBecause,
     keywords: relevance.keywords,
@@ -253,5 +337,6 @@ export async function collectNiche(
     unknownCountryVideos: exact.unknownCountry + broad.unknownCountry,
     channels: raw.data.channels.filter((c) => keptChannelIds.has(c.id)),
     baselines,
+    typical,
   };
 }

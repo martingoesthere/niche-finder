@@ -35,6 +35,7 @@ export type ChannelInfo = {
 
 export type SearchOptions = {
   publishedAfter?: Date;
+  publishedBefore?: Date;
   maxResults?: number; // YouTube allows up to 50
   order?: "viewCount" | "relevance" | "date";
   language?: string; // "en" or "es"
@@ -174,6 +175,8 @@ export async function searchVideos(
   };
   if (options.publishedAfter)
     params.publishedAfter = options.publishedAfter.toISOString();
+  if (options.publishedBefore)
+    params.publishedBefore = options.publishedBefore.toISOString();
   if (options.language) params.relevanceLanguage = options.language;
   if (options.regionCode) params.regionCode = options.regionCode;
   if (options.pageToken) params.pageToken = options.pageToken;

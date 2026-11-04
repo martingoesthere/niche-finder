@@ -134,6 +134,7 @@ app.get("/api/raw", async (req: Request, res: Response) => {
       removedVideos: result.removed.map((r) => ({ id: r.video.id, title: r.video.title, url: r.video.url, filter: r.filter, reason: r.reason })),
       channels: result.channels,
       channelBaselines: result.baselines,
+      ordinaryRecentUploads: result.typical,
     });
   } catch (err: unknown) {
     res.status(404).json({ error: err instanceof Error ? err.message : "No saved data for this topic yet." });

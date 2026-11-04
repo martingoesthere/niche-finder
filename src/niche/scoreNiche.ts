@@ -6,6 +6,7 @@ export const MIN_FOR_SUBSCORE = 10; // each score needs at least this many items
 export const GIANT_CHANNEL_SUBS = 1_000_000; // excluded from Opportunity
 export const OUTLIER_RATIO = 2; // video views must be 2x the channel's subscribers
 export const NEW_CHANNEL_DAYS = 182; // "new channel" = started less than 6 months ago
+export const MIN_TYPICAL_VIDEOS = 10; // ordinary uploads needed before they can correct a score
 const DAY_MS = 86_400_000;
 
 // ---------- Shapes ----------
@@ -40,10 +41,24 @@ export type NicheMetrics = {
   videosLast90Days: number;
   medianLikesPer1kViews: number | null; // engagement: likes per 1,000 views
   medianCommentsPer1kViews: number | null; // engagement: comments per 1,000 views
+  // Ordinary recent uploads (30-90 days old, newest first): what normal videos get
+  typicalVideos: number; // 0 = not collected
+  typicalChannels: number;
+  typicalMedianViews: number | null;
+  typicalUnder1kShare: number | null; // share of ordinary uploads with fewer than 1,000 views
+  typicalSmallChannelVideos: number;
+  typicalBreakouts: number; // of those, videos with 2x+ more views than subscribers
+  topToTypicalGap: number | null; // median top views / median ordinary views
 };
+
+// Which scores were corrected with ordinary uploads (false = based on top videos only)
+export type Corrections = { demand: boolean; opportunity: boolean };
+
+export type TypicalInput = { videos: VideoInfo[]; channels: ChannelInfo[] } | null;
 
 export type NicheScores = {
   metrics: NicheMetrics;
+  corrected: Corrections;
   sampleSize: number;
   confidence: Confidence;
   windows: WindowStat[];
@@ -97,7 +112,12 @@ const MEANINGS = {
 };
 
 // ---------- Main ----------
-export function scoreNiche(videos: VideoInfo[], channels: ChannelInfo[], now = new Date()): NicheScores {
+export function scoreNiche(
+  videos: VideoInfo[],
+  channels: ChannelInfo[],
+  now = new Date(),
+  typical: TypicalInput = null,
+): NicheScores {
   const channelById = new Map<string, ChannelInfo>(channels.map((c) => [c.id, c]));
   const subsOf = (v: VideoInfo) => channelById.get(v.channelId)?.subscribers ?? null;
   const n = videos.length;
@@ -143,6 +163,30 @@ export function scoreNiche(videos: VideoInfo[], channels: ChannelInfo[], now = n
       median(videos.map((v) => per1k(v.likes, v.views)).filter((x): x is number => x !== null)), 1),
     medianCommentsPer1kViews: roundOrNull(
       median(videos.map((v) => per1k(v.comments, v.views)).filter((x): x is number => x !== null)), 2),
+    typicalVideos: 0, typicalChannels: 0, typicalMedianViews: null, typicalUnder1kShare: null,
+    typicalSmallChannelVideos: 0, typicalBreakouts: 0, topToTypicalGap: null,
+  };
+
+  // Ordinary recent uploads (the "not only winners" sample)
+  const tVideos = typical?.videos ?? [];
+  const tChannelById = new Map<string, ChannelInfo>((typical?.channels ?? []).map((c) => [c.id, c]));
+  const tSubsOf = (v: VideoInfo) => tChannelById.get(v.channelId)?.subscribers ?? null;
+  const tSmall = tVideos.filter((v) => {
+    const subs = tSubsOf(v);
+    return subs !== null && subs > 0 && subs < GIANT_CHANNEL_SUBS;
+  });
+  const tBreakouts = tSmall.filter((v) => v.views >= (tSubsOf(v) ?? Infinity) * OUTLIER_RATIO);
+  const tMedian = median(tVideos.map((v) => v.views));
+  metrics.typicalVideos = tVideos.length;
+  metrics.typicalChannels = new Set(tVideos.map((v) => v.channelId)).size;
+  metrics.typicalMedianViews = roundOrNull(tMedian);
+  metrics.typicalUnder1kShare = tVideos.length ? roundOrNull(tVideos.filter((v) => v.views < 1000).length / tVideos.length, 2) : null;
+  metrics.typicalSmallChannelVideos = tSmall.length;
+  metrics.typicalBreakouts = tBreakouts.length;
+  metrics.topToTypicalGap = tMedian && metrics.medianViews ? roundOrNull(metrics.medianViews / tMedian, 1) : null;
+  const corrected: Corrections = {
+    demand: tVideos.length >= MIN_TYPICAL_VIDEOS,
+    opportunity: tSmall.length >= MIN_FOR_SUBSCORE,
   };
 
   const money = notScored(
@@ -156,6 +200,7 @@ export function scoreNiche(videos: VideoInfo[], channels: ChannelInfo[], now = n
     const why = `Only ${n} verified videos (need ${MIN_VIDEOS_FOR_SCORE}+). Not scored.`;
     return {
       metrics,
+      corrected: { demand: false, opportunity: false },
       sampleSize: n,
       confidence,
       windows,
@@ -170,11 +215,15 @@ export function scoreNiche(videos: VideoInfo[], channels: ChannelInfo[], now = n
   // ---- 1. Demand: median views ----
   const medViews = median(videos.map((v) => v.views)) ?? 0;
   const topByViews = [...videos].sort((a, b) => b.views - a.views).slice(0, 3);
+  const topDemand = logScale(medViews, 3, 6);
+  const typicalDemand = corrected.demand && tMedian !== null ? logScale(tMedian, 3, 6) : null;
   const demand: Score = {
     name: "Demand",
-    score: logScale(medViews, 3, 6),
+    score: typicalDemand === null ? topDemand : Math.round((topDemand + typicalDemand) / 2),
     meaning: MEANINGS.demand,
-    explanation: `Median ${fmt(medViews)} views across ${n} videos (1K = 0, 1M+ = 100).`,
+    explanation: typicalDemand === null
+      ? `Median ${fmt(medViews)} views across ${n} top videos (1K = 0, 1M+ = 100). Not corrected: fewer than ${MIN_TYPICAL_VIDEOS} ordinary recent uploads found, so this may look better than reality.`
+      : `Average of top videos (median ${fmt(medViews)} views = ${topDemand}) and ordinary recent uploads (median ${fmt(tMedian ?? 0)} views across ${tVideos.length} videos = ${typicalDemand}). Scale: 1K = 0, 1M+ = 100.`,
     proof: topByViews.map((v) => ({
       label: v.title,
       detail: `${fmt(v.views)} views | ${v.channelTitle}`,
@@ -217,7 +266,24 @@ export function scoreNiche(videos: VideoInfo[], channels: ChannelInfo[], now = n
   });
 
   let opportunity: Score;
-  if (pool.length < MIN_FOR_SUBSCORE) {
+  if (corrected.opportunity) {
+    const share = tBreakouts.length / tSmall.length;
+    opportunity = {
+      name: "Opportunity",
+      score: shareScore(share, 0.3),
+      meaning: MEANINGS.opportunity,
+      explanation: `Of ${tSmall.length} ordinary recent uploads from channels under 1M subs, ${tBreakouts.length} got ${OUTLIER_RATIO}x+ more views than subscribers (${Math.round(share * 100)}%; 30%+ = 100). Measured on ordinary uploads, not only the most-viewed ones.`,
+      proof: [...tBreakouts]
+        .map((v) => ({ v, subs: tSubsOf(v) ?? 1 }))
+        .sort((a, b) => b.v.views / b.subs - a.v.views / a.subs)
+        .slice(0, 3)
+        .map(({ v, subs }) => ({
+          label: v.title,
+          detail: `${fmt(v.views)} views vs ${fmt(subs)} subs (${(v.views / subs).toFixed(1)}x) | ${v.channelTitle}`,
+          url: v.url,
+        })),
+    };
+  } else if (pool.length < MIN_FOR_SUBSCORE) {
     opportunity = notScored(
       "Opportunity",
       MEANINGS.opportunity,
@@ -233,7 +299,7 @@ export function scoreNiche(videos: VideoInfo[], channels: ChannelInfo[], now = n
       name: "Opportunity",
       score: shareScore(share, 0.3),
       meaning: MEANINGS.opportunity,
-      explanation: `${outliers.length} of ${pool.length} videos from channels under 1M subs got ${OUTLIER_RATIO}x+ more views than subscribers (${Math.round(share * 100)}%; 30%+ = 100).`,
+      explanation: `${outliers.length} of ${pool.length} top videos from channels under 1M subs got ${OUTLIER_RATIO}x+ more views than subscribers (${Math.round(share * 100)}%; 30%+ = 100). Not corrected: fewer than ${MIN_FOR_SUBSCORE} ordinary recent uploads from small channels, so this may look better than reality.`,
       proof: outliers.slice(0, 3).map(({ v, subs, ratio }) => ({
         label: v.title,
         detail: `${fmt(v.views)} views vs ${fmt(subs)} subs (${ratio.toFixed(1)}x) | ${v.channelTitle}`,
@@ -272,5 +338,5 @@ export function scoreNiche(videos: VideoInfo[], channels: ChannelInfo[], now = n
     };
   }
 
-  return { metrics, sampleSize: n, confidence, windows, demand, competition, opportunity, freshness, money };
+  return { metrics, corrected, sampleSize: n, confidence, windows, demand, competition, opportunity, freshness, money };
 }

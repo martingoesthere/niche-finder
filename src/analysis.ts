@@ -51,7 +51,7 @@ export async function commentsFor(videoIds: string[], cacheOnly: boolean) {
 
 // Scores, topic ideas and proof videos for one collected niche (no YouTube calls)
 export function analysisFor(result: NicheResult) {
-  const scores = scoreNiche(result.exactVideos, result.channels);
+  const scores = scoreNiche(result.exactVideos, result.channels, new Date(), result.typical);
   const topics = findTopics(result);
 
   const removed: Record<string, number> = {};
@@ -70,6 +70,11 @@ export function analysisFor(result: NicheResult) {
     totalFound: result.totalFound,
     removed,
     sampleSize: scores.sampleSize,
+    metrics: scores.metrics,
+    corrected: scores.corrected,
+    typical: result.typical
+      ? { savedAt: result.typical.savedAt, windowDays: result.typical.windowDays, totalFound: result.typical.totalFound, used: result.typical.videos.length }
+      : null,
     confidence: scores.confidence,
     windows: scores.windows,
     scores: scoreList,

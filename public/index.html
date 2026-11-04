@@ -143,11 +143,11 @@
     <summary>How the scores work</summary>
     <dl class="glossary">
       <dt>Demand: do people watch this?</dt>
-      <dd>Based on the median views of the verified videos (the middle video: half got more, half got less). 1,000 views = 0, 1,000,000 views = 100. Higher is better.</dd>
+      <dd>The average of two numbers on the same scale (1,000 views = 0, 1,000,000 views = 100): the median views of the <b>top videos</b> YouTube shows for the topic, and the median views of <b>ordinary recent uploads</b> (newest first, 30 to 90 days old, any number of views). Looking only at the top videos would make every niche look better than it is. If fewer than 10 ordinary uploads are found, Demand uses top videos only and says “not corrected”. Higher is better.</dd>
       <dt>Competition: how big are the channels you'd compete with?</dt>
       <dd>Based on the median subscribers of the channels in the results. 1,000 subs = 0, 10,000,000 subs = 100. Lower is easier for a new channel.</dd>
       <dt>Opportunity: can a small channel win here?</dt>
-      <dd>Of the videos from channels under 1M subscribers, the share that got more than twice as many views as the channel has subscribers. 30% or more = 100. Higher is better.</dd>
+      <dd>Of the <b>ordinary recent uploads</b> from channels under 1M subscribers, the share that got more than twice as many views as the channel has subscribers. Counting ordinary uploads (not only the most-viewed) shows your real chances. 30% or more = 100. If fewer than 10 such uploads are found, it uses top videos only and says “not corrected”. Higher is better.</dd>
       <dt>Freshness: are new channels making it?</dt>
       <dd>The share of videos made by channels that are less than 6 months old. 20% or more = 100. Higher is better.</dd>
       <dt>Fit</dt>
@@ -280,12 +280,17 @@
 
   function summarySentence(r) {
     const m = r.metrics;
+    const typicalOk = m.typicalVideos >= 10;
     const parts = [
-      `A typical video gets ${short(m.medianViews)} views`,
+      typicalOk
+        ? `Top videos get ${short(m.medianViews)} views, but an ordinary recent upload gets ${short(m.typicalMedianViews)}`
+        : `Top videos get ${short(m.medianViews)} views (ordinary uploads not checked yet)`,
       `a typical channel has ${short(m.medianSubscribers)} subscribers`,
     ];
-    const breakout = pct(m.outlierVideos, m.smallChannelVideos);
-    if (breakout !== null) parts.push(`${breakout}% of videos from channels under 1M subs got more views than double their subscribers`);
+    const breakout = m.typicalSmallChannelVideos >= 10
+      ? pct(m.typicalBreakouts, m.typicalSmallChannelVideos)
+      : pct(m.outlierVideos, m.smallChannelVideos);
+    if (breakout !== null) parts.push(`${breakout}% of ${m.typicalSmallChannelVideos >= 10 ? "ordinary uploads" : "top videos"} from channels under 1M subs got more views than double their subscribers`);
     const fresh = pct(m.newChannels, m.channels);
     if (fresh !== null) parts.push(`${fresh}% of the channels are less than 6 months old`);
     return parts.join(", ") + ".";
@@ -324,7 +329,13 @@
         terseToggle()),
       el("div", { class: "grid2" },
         scoreBox("Demand", r.demand, "Do people watch this? Higher is better.", false, [
-          metric(`Median views: ${num(m.medianViews)}`, "The middle video's views. It shows what a normal video gets, not one lucky viral hit."),
+          metric(`Top videos, median views: ${num(m.medianViews)}`, "The middle of the most-viewed videos YouTube shows for this topic. These are the winners."),
+          m.typicalVideos
+            ? metric(`Ordinary recent uploads, median views: ${num(m.typicalMedianViews)} (${m.typicalVideos} videos, 30–90 days old)`,
+                `What a normal new video here gets, not only the winners. ${m.typicalUnder1kShare === null ? "" : Math.round(m.typicalUnder1kShare * 100) + "% of them got fewer than 1,000 views."}${m.topToTypicalGap ? ` Top videos get ${m.topToTypicalGap}× more.` : ""}`)
+            : metric("Ordinary recent uploads: not checked yet", "Until they are, Demand is based on top videos only and may look better than reality."),
+          metric(r.corrected?.demand ? "Demand uses both: (top score + ordinary score) ÷ 2" : "Demand uses top videos only (not corrected)",
+            r.corrected?.demand ? "So a niche where only a few winners do well can't look better than it is." : "Fewer than 10 ordinary uploads were found, so it couldn't be corrected."),
           metric(`Median views per day: ${num(m.medianViewsPerDay)}`, "How fast videos collect views. A new video with many views per day is hotter than an old one with the same total."),
           metric(`Videos from the last 3 months: median ${num(w(3)?.medianViews)} (${w(3)?.videos ?? 0} videos). Last 6: ${num(w(6)?.medianViews)} (${w(6)?.videos ?? 0}). Last 12: ${num(w(12)?.medianViews)} (${w(12)?.videos ?? 0}).`,
             "If recent videos still do well, the niche is alive now, not only in the past."),
@@ -335,8 +346,12 @@
           metric(`Different channels: ${m.channels}`, "Many channels means lots of people succeed here. Very few means one or two creators own it."),
         ]),
         scoreBox("Opportunity", r.opportunity, "Can a small channel win here? Higher is better.", false, [
-          metric(`${m.outlierVideos} of ${m.smallChannelVideos} videos from channels under 1M subs got more than double their subscribers in views (${pct(m.outlierVideos, m.smallChannelVideos) ?? "—"}%)`,
-            "Proof that YouTube shows these videos to new people, not only to subscribers. That's how small channels grow."),
+          r.corrected?.opportunity
+            ? metric(`${m.typicalBreakouts} of ${m.typicalSmallChannelVideos} ordinary recent uploads from channels under 1M subs got more than double their subscribers in views (${pct(m.typicalBreakouts, m.typicalSmallChannelVideos) ?? "—"}%)`,
+                "This is the score. It counts every small channel posting here, including the ones that didn't break out, so it shows your real chances.")
+            : metric("Not corrected: fewer than 10 ordinary uploads from small channels", "So this score uses top videos only and may look better than reality."),
+          metric(`Among top videos: ${m.outlierVideos} of ${m.smallChannelVideos} from channels under 1M subs got more than double their subscribers (${pct(m.outlierVideos, m.smallChannelVideos) ?? "—"}%)`,
+            "Only the winners, so this is usually higher than the number above. Shown so you can compare."),
           metric(`Videos with 3× or more their own channel's normal views: ${r.channelOutliers}`, "These topics pushed a channel far above its normal. Copy the topic, not the channel."),
           r.bestOutlier
             ? el("div", { class: "metric" },
@@ -619,6 +634,9 @@
           el("div", {}, el("h2", { textContent: `“${d.query}”` }),
             el("p", { class: "muted small", textContent: `${d.sampleSize} verified videos used of ${d.totalFound} found · ${d.confidence} confidence · ${d.fromCache ? "saved data, 0 units used" : `about ${num(d.unitsUsed)} units used`}` }),
             el("p", { class: "muted small", textContent: `Removed before scoring: ${removed}.` }),
+            d.metrics?.typicalVideos
+              ? el("p", { class: "small", textContent: `Reality check: top videos get a median of ${num(d.metrics.medianViews)} views; ordinary recent uploads get ${num(d.metrics.typicalMedianViews)} (${d.metrics.typicalVideos} videos, 30–90 days old${d.metrics.typicalUnder1kShare === null ? "" : `, ${Math.round(d.metrics.typicalUnder1kShare * 100)}% under 1,000 views`}).` })
+              : el("p", { class: "small muted", textContent: "Reality check: ordinary recent uploads not checked yet, so scores may look better than reality." }),
             el("p", { class: "small" }, el("a", {
               href: target.id ? `/api/raw?node=${encodeURIComponent(target.id)}` : `/api/raw?q=${encodeURIComponent(target.q)}&lang=${target.lang}&format=${target.format}`,
               textContent: "Download the raw YouTube data behind this page (JSON)" }))),

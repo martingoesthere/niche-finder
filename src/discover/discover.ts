@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { collectNiche, NotCachedError, type CollectOptions } from "../niche/collectNiche.js";
+import { collectNiche, NotCachedError, TYPICAL_MAX_PAGES, type CollectOptions } from "../niche/collectNiche.js";
 import { scoreNiche, type Confidence, type NicheMetrics, type WindowStat } from "../niche/scoreNiche.js";
 import { findTopics } from "../topics/findTopics.js";
 import { MAX_BASELINE_CHANNELS } from "../youtube/enrich.js";
@@ -14,8 +14,9 @@ const TREE_CACHE_HOURS = 24 * 7;
 
 // Most units one node can use: each page = 1 search (100) + video stats (1) + channel stats (1)
 export function maxUnitsFor(level: NicheLevel): number {
-  // search pages + each kept channel's latest uploads (2 units each, up to 100 channels)
-  return PAGES_BY_LEVEL[level] * 102 + 2 * MAX_BASELINE_CHANNELS;
+  // top-video pages + each kept channel's latest uploads (2 units each, up to 100 channels)
+  // + ordinary recent uploads (up to 2 pages)
+  return PAGES_BY_LEVEL[level] * 102 + 2 * MAX_BASELINE_CHANNELS + TYPICAL_MAX_PAGES * 102;
 }
 
 // Same options everywhere, so the page and the scripts share one saved copy per node
@@ -43,6 +44,7 @@ export type NodeRow = {
   topTopics: string[];
   // The numbers behind the scores
   metrics: NicheMetrics | null;
+  corrected: { demand: boolean; opportunity: boolean } | null;
   windows: WindowStat[];
   totalFound: number; // videos YouTube returned before filtering
   removed: Record<string, number>; // removed videos by filter
@@ -66,7 +68,7 @@ function emptyRow(node: TreeNode): NodeRow {
     checked: false, checkedAt: null, confidence: null, sampleSize: 0,
     demand: null, competition: null, opportunity: null, freshness: null, fit: null,
     medianViews: null, bestOutlier: null, topTopics: [],
-    metrics: null, windows: [], totalFound: 0, removed: {}, topicCount: 0, channelOutliers: 0,
+    metrics: null, corrected: null, windows: [], totalFound: 0, removed: {}, topicCount: 0, channelOutliers: 0,
   };
 }
 
@@ -79,7 +81,7 @@ async function rowFor(node: TreeNode, cacheOnly: boolean): Promise<{ row: NodeRo
     throw err;
   }
 
-  const scores = scoreNiche(result.exactVideos, result.channels);
+  const scores = scoreNiche(result.exactVideos, result.channels, new Date(), result.typical);
   const topics = findTopics(result);
   const best = topics.outliers[0];
 
@@ -105,6 +107,7 @@ async function rowFor(node: TreeNode, cacheOnly: boolean): Promise<{ row: NodeRo
       : null,
     topTopics: topics.topics.slice(0, 3).map((t) => t.phrase),
     metrics: scores.metrics,
+    corrected: scores.corrected,
     windows: scores.windows,
     totalFound: result.totalFound,
     removed: result.removed.reduce<Record<string, number>>((acc, r) => {
