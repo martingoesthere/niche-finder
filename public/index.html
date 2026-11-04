@@ -48,6 +48,9 @@
     .step.now::before { border-color: var(--accent); color: var(--accent); }
     .step.done:hover b { text-decoration: underline; }
 
+    .welcome { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 20px 22px; margin: 22px 0 8px; }
+    .welcome p { max-width: 64ch; margin-top: 6px; }
+    .welcome .btn.big { font-size: 19px; padding: 14px 26px; margin: 14px 0 8px; }
     .bar-row { display: flex; justify-content: space-between; align-items: end; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
     .panel { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px 18px; margin-bottom: 14px; }
     .notice { background: var(--accent-soft); border: 1px solid var(--accent); border-radius: 14px; padding: 14px 18px; margin-bottom: 14px; }
@@ -146,6 +149,13 @@
 <main>
   <h1>Niche Finder</h1>
   <p class="lead">The best niches and video ideas, found automatically. Every number comes from real YouTube videos in the US, UK, Canada and Australia, and you can open each video to check it.</p>
+
+  <section class="welcome" id="welcome">
+    <h2>Welcome, Martin 👋</h2>
+    <p>Click the button and the app checks YouTube for you: it ranks 10 niches, goes deeper into the best ones, and finds video ideas with real proof. You don't need to type anything.</p>
+    <button class="btn big" id="findBtn" type="button">Find my best niches</button>
+    <p class="small muted" id="findNote">The first time takes 2 to 3 minutes. Niches already checked stay saved for 7 days, so clicking again is free and continues where it stopped (up to 7,000 YouTube units a day).</p>
+  </section>
 
   <nav class="trail" id="trail" aria-label="Where you are"></nav>
   <div id="view"></div>
@@ -767,7 +777,23 @@
     return card;
   }
 
+  let reportRunning = false;
   async function showReport() {
+    if (reportRunning) return; // one request at a time
+    reportRunning = true;
+    const btn = document.getElementById("findBtn");
+    btn.disabled = true;
+    btn.textContent = "Checking YouTube…";
+    try {
+      await runReport();
+    } finally {
+      reportRunning = false;
+      btn.disabled = false;
+      btn.textContent = "Find my best niches again";
+    }
+  }
+
+  async function runReport() {
     inReport = true;
     ideasFor = null;
     crumbs = [];
@@ -914,7 +940,8 @@
     showIdeas({ q, label: q, depth: -1, lang: document.getElementById("lang").value, format: document.getElementById("format").value });
   });
 
-  showReport();
+  document.getElementById("findBtn").addEventListener("click", showReport);
+  view.replaceChildren(el("p", { class: "muted", textContent: "Click “Find my best niches” to start." }));
 </script>
 </body>
 </html>
