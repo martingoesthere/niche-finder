@@ -3,6 +3,7 @@ import path from "node:path";
 import { collectNiche, NotCachedError, type CollectOptions } from "../niche/collectNiche.js";
 import { scoreNiche, type Confidence, type NicheMetrics, type WindowStat } from "../niche/scoreNiche.js";
 import { findTopics } from "../topics/findTopics.js";
+import { MAX_BASELINE_CHANNELS } from "../youtube/enrich.js";
 import { NICHE_TREE, PAGES_BY_LEVEL, type NicheGroup, type NicheLevel, type TreeNode } from "./nicheTree.js";
 
 // Default budget for "npm run discover", leaving room for normal searches in your 10,000 daily units
@@ -13,7 +14,8 @@ const TREE_CACHE_HOURS = 24 * 7;
 
 // Most units one node can use: each page = 1 search (100) + video stats (1) + channel stats (1)
 export function maxUnitsFor(level: NicheLevel): number {
-  return PAGES_BY_LEVEL[level] * 102;
+  // search pages + each kept channel's latest uploads (2 units each, up to 100 channels)
+  return PAGES_BY_LEVEL[level] * 102 + 2 * MAX_BASELINE_CHANNELS;
 }
 
 // Same options everywhere, so the page and the scripts share one saved copy per node

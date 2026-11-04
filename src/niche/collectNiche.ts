@@ -9,6 +9,7 @@ import {
   type ChannelInfo,
   type VideoInfo,
 } from "../youtube/youtubeApi.js";
+import { getBaselines, type ChannelBaseline } from "../youtube/enrich.js";
 
 // Your reliability rule: score only with at least this many kept videos
 export const MIN_VIDEOS = 30;
@@ -50,6 +51,8 @@ export type NicheResult = {
   removed: RemovedVideo[]; // every removed video, with the filter and the reason
   unknownCountryVideos: number;
   channels: ChannelInfo[]; // channels of the kept videos
+  // Each kept channel's normal views, from its latest uploads (missing = not checked yet)
+  baselines: Record<string, ChannelBaseline>;
 };
 
 export type CollectOptions = {
@@ -120,7 +123,7 @@ export async function collectNiche(
   const maxPages = options.maxPages ?? DEFAULT_MAX_PAGES;
   const format = options.format ?? "long";
   const cleanQuery = query.trim().toLowerCase();
-  const key = `niche:v8:${language}:${region}:${months}m:p${maxPages}:${format}:${targetCountries.join("-")}:${cleanQuery}`;
+  const key = `niche:v9:${language}:${region}:${months}m:p${maxPages}:${format}:${targetCountries.join("-")}:${cleanQuery}`;
 
   if (options.cacheOnly && !(await hasCache(key, options.maxAgeHours ?? 24))) {
     throw new NotCachedError(cleanQuery);
@@ -220,6 +223,9 @@ export async function collectNiche(
   const videos = [...exactType.kept, ...broadType.kept];
   const keptChannelIds = new Set(videos.map((v) => v.channelId));
 
+  // 3. Each kept channel's normal views, from its latest uploads (2 units per channel, saved 7 days)
+  const { baselines, unitsUsed: baselineUnits } = await getBaselines([...keptChannelIds], options.cacheOnly ?? false);
+
   return {
     query: cleanQuery,
     language,
@@ -229,7 +235,7 @@ export async function collectNiche(
     format,
     fromCache: raw.fromCache,
     savedAt: raw.savedAt,
-    unitsUsed: raw.fromCache ? 0 : raw.data.unitsUsed,
+    unitsUsed: (raw.fromCache ? 0 : raw.data.unitsUsed) + baselineUnits,
     pagesFetched: raw.data.pagesFetched,
     stoppedBecause: raw.data.stoppedBecause,
     keywords: relevance.keywords,
@@ -246,5 +252,6 @@ export async function collectNiche(
     ],
     unknownCountryVideos: exact.unknownCountry + broad.unknownCountry,
     channels: raw.data.channels.filter((c) => keptChannelIds.has(c.id)),
+    baselines,
   };
 }

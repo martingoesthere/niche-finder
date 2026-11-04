@@ -18,6 +18,7 @@ export type VideoInfo = {
   madeForKids: boolean | null; // YouTube's "made for kids" flag
   audioLanguage: string | null; // spoken language, if the creator set it (e.g. "en", "hi")
   textLanguage: string | null; // title/description language, if set
+  tags: string[]; // the creator's tags (empty if none or hidden)
   url: string;
 };
 
@@ -197,6 +198,7 @@ type RawVideosResponse = {
       channelTitle: string;
       publishedAt: string;
       categoryId?: string;
+      tags?: string[];
       defaultAudioLanguage?: string;
       defaultLanguage?: string;
     };
@@ -235,6 +237,7 @@ export async function getVideos(videoIds: string[]): Promise<VideoInfo[]> {
         madeForKids: v.status?.madeForKids ?? null,
         audioLanguage: v.snippet.defaultAudioLanguage ?? null,
         textLanguage: v.snippet.defaultLanguage ?? null,
+        tags: v.snippet.tags ?? [],
         url: `https://www.youtube.com/watch?v=${v.id}`,
       });
     }
@@ -288,4 +291,72 @@ export async function getChannels(
   }
 
   return results;
+}
+
+// ---------- 4. A channel's latest uploads (costs 1 unit per 50 videos) ----------
+// Every channel has an "uploads" playlist: its ID is the channel ID with "UC" changed to "UU".
+
+type RawPlaylistItemsResponse = {
+  items?: Array<{ contentDetails?: { videoId?: string } }>;
+};
+
+export async function getRecentUploadIds(channelId: string, max = 50): Promise<string[]> {
+  if (!channelId.startsWith("UC")) return [];
+  try {
+    const data = await callYouTube<RawPlaylistItemsResponse>("playlistItems", {
+      part: "contentDetails",
+      playlistId: "UU" + channelId.slice(2),
+      maxResults: String(Math.min(max, 50)),
+    });
+    return (data.items ?? [])
+      .map((item) => item.contentDetails?.videoId)
+      .filter((id): id is string => Boolean(id));
+  } catch (err) {
+    // No public uploads playlist: not an error for us, just no data
+    if (err instanceof YouTubeApiError && ["playlistNotFound", "playlistItemsNotAccessible"].includes(err.reason)) return [];
+    throw err;
+  }
+}
+
+// ---------- 5. Top comments on a video (costs 1 unit per call) ----------
+
+export type CommentInfo = {
+  text: string;
+  likes: number;
+  publishedAt: string;
+};
+
+type RawCommentThreadsResponse = {
+  items?: Array<{
+    snippet?: {
+      topLevelComment?: {
+        snippet?: { textOriginal?: string; textDisplay?: string; likeCount?: number; publishedAt?: string };
+      };
+    };
+  }>;
+};
+
+export async function getTopComments(videoId: string, max = 20): Promise<CommentInfo[]> {
+  try {
+    const data = await callYouTube<RawCommentThreadsResponse>("commentThreads", {
+      part: "snippet",
+      videoId,
+      order: "relevance",
+      textFormat: "plainText",
+      maxResults: String(Math.min(max, 100)),
+    });
+    return (data.items ?? [])
+      .map((item) => item.snippet?.topLevelComment?.snippet)
+      .filter((c): c is NonNullable<typeof c> => Boolean(c?.textOriginal ?? c?.textDisplay))
+      .map((c) => ({
+        text: (c.textOriginal ?? c.textDisplay ?? "").trim(),
+        likes: c.likeCount ?? 0,
+        publishedAt: c.publishedAt ?? "",
+      }));
+  } catch (err) {
+    // Comments turned off on this video: not an error for us, just no comments
+    // (Quota errors are also 403s, so we check the exact reason and never hide those.)
+    if (err instanceof YouTubeApiError && ["commentsDisabled", "forbidden", "videoNotFound"].includes(err.reason)) return [];
+    throw err;
+  }
 }

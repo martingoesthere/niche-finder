@@ -1,6 +1,7 @@
 import type { NicheResult } from "./niche/collectNiche.js";
 import { scoreNiche, type Score } from "./niche/scoreNiche.js";
 import { findTopics, type VideoSignal } from "./topics/findTopics.js";
+import { getVideoComments, type VideoComments } from "./youtube/enrich.js";
 
 // Smaller video shape for the page (only what it shows and filters on)
 export function videoForPage(s: VideoSignal) {
@@ -16,7 +17,8 @@ export function videoForPage(s: VideoSignal) {
     country: s.channel?.country ?? null,
     channelCreatedAt: s.channel?.createdAt ?? null,
     channelVideoCount: s.channel?.videoCount ?? null,
-    // views vs the channel's own average, for every channel (giants included), used by the Explorer
+    id: s.video.id,
+    // views vs the channel's normal views, for every channel (giants included), used by the Explorer
     ratioVsChannel:
       s.channelAvgViews && s.channelAvgViews > 0 ? Number((s.video.views / s.channelAvgViews).toFixed(1)) : null,
     subscribers: s.channel?.subscribers ?? null,
@@ -24,7 +26,27 @@ export function videoForPage(s: VideoSignal) {
     ageDays: Math.round(s.ageDays),
     outlierRatio: s.outlierRatio === null ? null : Number(s.outlierRatio.toFixed(1)),
     channelAvgViews: s.channelAvgViews === null ? null : Math.round(s.channelAvgViews),
+    baselineSource: s.baselineSource,
+    baselineSample: s.baselineSample,
+    likes: s.video.likes,
+    comments: s.video.comments,
+    tags: s.video.tags ?? [],
   };
+}
+
+// How many of the top outliers get their comments read (1 unit each, saved 7 days)
+export const COMMENT_VIDEOS = 5;
+
+// Top comments and viewer requests on the best outliers. cacheOnly = never call YouTube.
+export async function commentsFor(videoIds: string[], cacheOnly: boolean) {
+  const out: VideoComments[] = [];
+  let unitsUsed = 0;
+  for (const id of videoIds.slice(0, COMMENT_VIDEOS)) {
+    const { comments, unitsUsed: used } = await getVideoComments(id, cacheOnly);
+    unitsUsed += used;
+    if (comments) out.push(comments);
+  }
+  return { comments: out, unitsUsed };
 }
 
 // Scores, topic ideas and proof videos for one collected niche (no YouTube calls)
@@ -65,6 +87,12 @@ export function analysisFor(result: NicheResult) {
     videos: topics.all.map(videoForPage),
     outliers: topics.outliers.slice(0, 5).map(videoForPage),
     momentum: topics.momentum.slice(0, 5).map(videoForPage),
+    topTags: topics.topTags,
+    baselines: {
+      channels: Object.keys(result.baselines ?? {}).length,
+      recentUploadVideos: topics.all.filter((s) => s.baselineSource === "recent uploads").length,
+      lifetimeAverageVideos: topics.all.filter((s) => s.baselineSource === "lifetime average").length,
+    },
   };
 }
 

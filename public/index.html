@@ -156,6 +156,12 @@
       <dd>70 to 100 = High (or Hard for competition). 40 to 69 = Medium. 0 to 39 = Low (or Easy for competition). The small marks on each meter sit at 40 and 70.</dd>
       <dt>Confidence</dt>
       <dd>Low = 30 to 49 verified videos, medium = 50 to 99, high = 100 or more. Below 30 videos the app gives no score.</dd>
+      <dt>Where every number comes from</dt>
+      <dd><b>Straight from YouTube</b> (YouTube Data API v3, nothing changed): views, likes, comment counts, upload dates, video length, category, “made for kids”, language tags, creator tags, channel subscribers, channel start date, channel country, each channel's latest uploads, and top comments.</dd>
+      <dd><b>Calculated by the app</b> (formulas above): medians, percentages, the four scores, Fit, outlier ratios, topic ideas and viewer requests. Every one of them can be checked by hand from the raw data.</dd>
+      <dd><b>Check it yourself</b>: every video is a link to YouTube, and each topic page has a “Download the raw YouTube data” link with every field the scores use.</dd>
+      <dt>Channel's “normal” views</dt>
+      <dd>The median views of the channel's last 50 uploads of the same type (long or Short), leaving out uploads younger than 14 days because they're still collecting views. It needs at least 5 such uploads; otherwise the app uses the channel's lifetime average and says so.</dd>
       <dt>What is not included</dt>
       <dd>Money (ad rates), AI content and faceless detection. Free YouTube data doesn't show them, so the app doesn't guess.</dd>
     </dl>
@@ -331,10 +337,10 @@
         scoreBox("Opportunity", r.opportunity, "Can a small channel win here? Higher is better.", false, [
           metric(`${m.outlierVideos} of ${m.smallChannelVideos} videos from channels under 1M subs got more than double their subscribers in views (${pct(m.outlierVideos, m.smallChannelVideos) ?? "—"}%)`,
             "Proof that YouTube shows these videos to new people, not only to subscribers. That's how small channels grow."),
-          metric(`Videos with 3× or more their own channel's average views: ${r.channelOutliers}`, "These topics pushed a channel far above its normal. Copy the topic, not the channel."),
+          metric(`Videos with 3× or more their own channel's normal views: ${r.channelOutliers}`, "These topics pushed a channel far above its normal. Copy the topic, not the channel."),
           r.bestOutlier
             ? el("div", { class: "metric" },
-                el("div", { class: "val" }, `Best example: ${r.bestOutlier.ratio}× its channel's average, ${num(r.bestOutlier.views)} views, ${subs(r.bestOutlier.subscribers)} subscribers`),
+                el("div", { class: "val" }, `Best example: ${r.bestOutlier.ratio}× its channel's normal, ${num(r.bestOutlier.views)} views, ${subs(r.bestOutlier.subscribers)} subscribers`),
                 el("div", { class: "small" }, vlink(r.bestOutlier.title, r.bestOutlier.url)),
                 el("div", { class: "why", textContent: "Your best video to study first." }))
             : null,
@@ -485,6 +491,53 @@
       el("div", { class: "m", textContent: `${num(v.views)} views · ${subs(v.subscribers)} subscribers · ${v.channelTitle}${note ? " · " + note : ""}` }));
   }
 
+  // Says exactly where a channel's "normal views" came from
+  function baselineText(v) {
+    if (v.baselineSource === "recent uploads")
+      return `its channel's normal of ${num(v.channelAvgViews)} views (median of its last ${v.baselineSample} ${v.durationSeconds > 0 && v.durationSeconds <= 180 ? "Shorts" : "long videos"})`;
+    if (v.baselineSource === "lifetime average")
+      return `its channel's lifetime average of ${num(v.channelAvgViews)} views (less precise: latest uploads not checked)`;
+    return "its channel's normal (unknown)";
+  }
+
+  // What viewers say on the best outliers: requests first, then top comments
+  function viewerSection(list) {
+    if (!list || !list.length) return null;
+    const byId = {};
+    list.forEach((c) => (byId[c.videoId] = c));
+    const requests = list.flatMap((c) => c.requests.map((r) => ({ ...r, videoId: c.videoId }))).sort((a, b) => b.likes - a.likes);
+    const box = el("div", { class: "panel" });
+    if (requests.length) {
+      const ul = el("ul", { class: "vids" });
+      requests.slice(0, 10).forEach((r) => ul.append(el("li", {},
+        el("div", { textContent: `“${r.text.length > 300 ? r.text.slice(0, 300) + "…" : r.text}”` }),
+        el("div", { class: "m" }, `${num(r.likes)} likes · contains “${r.matched}” · on `,
+          el("a", { href: `https://www.youtube.com/watch?v=${r.videoId}`, target: "_blank", rel: "noopener", textContent: "this video" })))));
+      box.append(el("h3", { textContent: `Viewer requests (${requests.length})` }),
+        el("p", { class: "small muted", textContent: "Top comments that ask for a video, found by exact phrases like “make a video”, “part 2” or “can you do”. Shown word for word." }), ul);
+    } else {
+      box.append(el("p", { class: "muted", textContent: "No comment on these videos asks for a new video (checked with phrases like “make a video”, “part 2”, “can you do”)." }));
+    }
+    const all = el("details", { class: "more" }, el("summary", { textContent: `Read the top comments (${list.reduce((n, c) => n + c.comments.length, 0)})` }));
+    list.forEach((c) => {
+      const ul = el("ul", { class: "vids" });
+      c.comments.slice(0, 5).forEach((cm) => ul.append(el("li", {},
+        el("div", { textContent: cm.text.length > 300 ? cm.text.slice(0, 300) + "…" : cm.text }),
+        el("div", { class: "m", textContent: `${num(cm.likes)} likes` }))));
+      all.append(el("div", { class: "small", style: "margin-top:10px" }, el("a", { href: `https://www.youtube.com/watch?v=${c.videoId}`, target: "_blank", rel: "noopener", textContent: "Comments on this video" })), ul);
+    });
+    box.append(all);
+    return el("section", { class: "block" }, el("h2", { textContent: "What viewers ask for" }),
+      el("p", { class: "lead", textContent: "From the top comments on the videos that beat their own channel. Real comments from YouTube, nothing rewritten." }), box);
+  }
+
+  function tagSection(tags) {
+    if (!tags || !tags.length) return null;
+    return el("section", { class: "block" }, el("h2", { textContent: "Tags successful videos use" }),
+      el("p", { class: "lead", textContent: "Tags creators added to the verified videos, used by 2 or more different channels. Exactly as they typed them." }),
+      el("div", { class: "panel" }, ...tags.map((t) => el("span", { class: "chip", title: `${t.videos} videos, median ${num(t.medianViews)} views`, textContent: `${t.tag} · ${t.channels} channels` }))));
+  }
+
   // Video ideas, outliers, fast-growing videos (and, when full, scores + explorer) for one analysis
   function ideasSections(d, { full = false, maxIdeas = 10 } = {}) {
       const ideas = el("section", { class: "block" },
@@ -508,7 +561,7 @@
       });
 
       const outliers = el("ul", { class: "vids" });
-      d.outliers.forEach((v) => outliers.append(videoItem(v, `${v.outlierRatio}× its channel's average of ${num(v.channelAvgViews)}`)));
+      d.outliers.forEach((v) => outliers.append(videoItem(v, `${v.outlierRatio}× ${baselineText(v)}`)));
       const momentum = el("ul", { class: "vids" });
       d.momentum.forEach((v) => momentum.append(videoItem(v, `${num(v.viewsPerDay)} views per day, ${v.ageDays} days old`)));
 
@@ -531,11 +584,13 @@
 
       const sections = [ideas,
         el("section", { class: "block" }, el("h2", { textContent: "Videos that beat their own channel" }),
-          el("p", { class: "lead", textContent: "Channels under 1M subscribers whose video got 3× or more their usual views. Study these first." }),
+          el("p", { class: "lead", textContent: "Channels under 1M subscribers whose video got 3× or more their normal views. “Normal” is the median views of the channel's last 50 uploads of the same type (long or Short), not counting uploads younger than 14 days." }),
           el("div", { class: "panel" }, d.outliers.length ? outliers : el("p", { class: "muted", textContent: "None in this data." }))),
         el("section", { class: "block" }, el("h2", { textContent: "Fast-growing new videos" }),
           el("p", { class: "lead", textContent: "Published in the last 90 days, sorted by views per day." }),
-          el("div", { class: "panel" }, d.momentum.length ? momentum : el("p", { class: "muted", textContent: "None in this data." })))];
+          el("div", { class: "panel" }, d.momentum.length ? momentum : el("p", { class: "muted", textContent: "None in this data." }))),
+        viewerSection(d.viewerComments),
+        tagSection(d.topTags)].filter(Boolean);
       if (full) sections.push(
         el("section", { class: "block" }, el("h2", { textContent: "Scores for this topic" }),
           el("p", { class: "lead", textContent: "The same four scores, with the proof videos behind each one." }), scoreList),
@@ -563,7 +618,10 @@
         el("div", { class: "bar-row" },
           el("div", {}, el("h2", { textContent: `“${d.query}”` }),
             el("p", { class: "muted small", textContent: `${d.sampleSize} verified videos used of ${d.totalFound} found · ${d.confidence} confidence · ${d.fromCache ? "saved data, 0 units used" : `about ${num(d.unitsUsed)} units used`}` }),
-            el("p", { class: "muted small", textContent: `Removed before scoring: ${removed}.` })),
+            el("p", { class: "muted small", textContent: `Removed before scoring: ${removed}.` }),
+            el("p", { class: "small" }, el("a", {
+              href: target.id ? `/api/raw?node=${encodeURIComponent(target.id)}` : `/api/raw?q=${encodeURIComponent(target.q)}&lang=${target.lang}&format=${target.format}`,
+              textContent: "Download the raw YouTube data behind this page (JSON)" }))),
           back),
         ...ideasSections(d, { full: true }),
       );
@@ -667,13 +725,13 @@
   const RANGES = [
     ["avg", "Channel's average views", (v) => v.channelAvgViews],
     ["dur", "Video length (minutes)", (v) => v.durationSeconds / 60],
-    ["ratio", "Times its channel's average", (v) => v.ratioVsChannel],
+    ["ratio", "Times its channel's normal", (v) => v.ratioVsChannel],
     ["subs", "Subscribers", (v) => v.subscribers],
     ["views", "Video views", (v) => v.views],
     ["count", "Channel's number of videos", (v) => v.channelVideoCount],
   ];
   const XSORTS = {
-    ratio: ["Times its channel's average", (v) => v.ratioVsChannel ?? -1],
+    ratio: ["Times its channel's normal", (v) => v.ratioVsChannel ?? -1],
     views: ["Video views", (v) => v.views],
     perDay: ["Views per day", (v) => v.viewsPerDay],
     subs: ["Subscribers", (v) => v.subscribers ?? -1],
@@ -727,7 +785,7 @@
       rows.sort((a, b) => (get(a) - get(b)) * dir);
       count.textContent = `Showing ${rows.length} of ${videos.length} verified videos.`;
       list.replaceChildren(...rows.map((v) => videoItem(v,
-        `${v.ratioVsChannel === null ? "?" : v.ratioVsChannel + "×"} its channel's average · ${Math.round(v.durationSeconds / 60)} min · uploaded ${v.publishedAt.slice(0, 10)} · ${v.country ?? "country not set"}`)));
+        `${v.ratioVsChannel === null ? "?" : v.ratioVsChannel + "×"} ${baselineText(v)} · ${Math.round(v.durationSeconds / 60)} min · uploaded ${v.publishedAt.slice(0, 10)} · ${v.country ?? "country not set"}`)));
     };
     const apply = el("button", { type: "button", class: "btn", textContent: "Apply filters" });
     const reset = el("button", { type: "button", class: "btn quiet", textContent: "Clear filters" });

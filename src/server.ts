@@ -5,7 +5,7 @@ import { checkNodes, collectOptionsFor, maxUnitsFor, readRows } from "./discover
 import { NICHE_TREE, findNode } from "./discover/nicheTree.js";
 import { CHARACTERISTICS } from "./discover/characteristics.js";
 import { addUnits } from "./quota.js";
-import { analysisFor } from "./analysis.js";
+import { analysisFor, commentsFor } from "./analysis.js";
 import { buildReport } from "./discover/report.js";
 
 const PORT = Number(process.env.PORT ?? 3000);
@@ -36,8 +36,10 @@ app.get("/api/analyze", async (req: Request, res: Response) => {
       query,
       node ? collectOptionsFor(node) : { language, format, region: language === "es" ? "MX" : "US" },
     );
-    await addUnits(result.unitsUsed);
-    res.json(analysisFor(result));
+    const analysis = analysisFor(result);
+    const { comments, unitsUsed: commentUnits } = await commentsFor(analysis.outliers.map((v) => v.id), false);
+    await addUnits(result.unitsUsed + commentUnits);
+    res.json({ ...analysis, unitsUsed: result.unitsUsed + commentUnits, viewerComments: comments });
   } catch (err: unknown) {
     if (err instanceof YouTubeApiError) {
       const status = err.reason === "quotaExceeded" || err.reason === "dailyLimitExceeded" ? 429 : 502;
@@ -108,6 +110,33 @@ app.get("/api/report", async (_req: Request, res: Response) => {
   } catch (err: unknown) {
     console.error(err);
     res.status(500).json({ error: err instanceof Error ? err.message : "Something went wrong." });
+  }
+});
+
+// The raw YouTube data behind a result, so you can check every number yourself (free: saved data only)
+app.get("/api/raw", async (req: Request, res: Response) => {
+  const node = req.query.node ? findNode(String(req.query.node)) : null;
+  const query = node ? node.query : String(req.query.q ?? "").trim();
+  const language = req.query.lang === "es" ? "es" : "en";
+  const format = req.query.format === "short" || req.query.format === "all" ? req.query.format : "long";
+  try {
+    const result = await collectNiche(query, {
+      ...(node ? collectOptionsFor(node) : { language, format, region: language === "es" ? "MX" : "US" }),
+      cacheOnly: true,
+    });
+    const file = `niche-finder-raw-${query.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}.json`;
+    res.setHeader("Content-Disposition", `attachment; filename="${file}"`);
+    res.json({
+      about: "Raw YouTube Data API v3 data saved by Niche Finder. Every score is calculated from these fields.",
+      query: result.query,
+      collectedAt: result.savedAt,
+      keptVideos: result.videos,
+      removedVideos: result.removed.map((r) => ({ id: r.video.id, title: r.video.title, url: r.video.url, filter: r.filter, reason: r.reason })),
+      channels: result.channels,
+      channelBaselines: result.baselines,
+    });
+  } catch (err: unknown) {
+    res.status(404).json({ error: err instanceof Error ? err.message : "No saved data for this topic yet." });
   }
 });
 

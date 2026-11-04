@@ -2,9 +2,10 @@ import type { NicheResult } from "../niche/collectNiche.js";
 import { median } from "../niche/scoreNiche.js";
 import { toWords } from "../niche/relevance.js";
 import type { ChannelInfo, VideoInfo } from "../youtube/youtubeApi.js";
+import type { ChannelBaseline } from "../youtube/enrich.js";
 
 // ---------- Rules (easy to tune in Step 6) ----------
-export const OUTLIER_MIN_RATIO = 3; // video views must be 3x the channel's average views per video
+export const OUTLIER_MIN_RATIO = 3; // video views must be 3x the channel's normal views
 export const GIANT_CHANNEL_SUBS = 1_000_000; // giant channels can't count as outliers
 export const RECENT_DAYS = 90; // "recent" = published in the last 90 days
 export const MIN_TOPIC_CHANNELS = 2; // a topic must work for at least 2 different channels
@@ -30,9 +31,15 @@ export type VideoSignal = {
   channel: ChannelInfo | null;
   ageDays: number;
   viewsPerDay: number;
-  channelAvgViews: number | null; // channel's lifetime views / number of videos
-  outlierRatio: number | null; // video views / channel average
+  // The channel's normal views per video. Best: the median of its latest uploads
+  // (same type: long or Short, older than 14 days). Fallback: lifetime views / number of videos.
+  channelAvgViews: number | null;
+  baselineSource: "recent uploads" | "lifetime average" | null;
+  baselineSample: number; // uploads behind the median (0 for the lifetime average)
+  outlierRatio: number | null; // video views / channel's normal (null for channels with 1M+ subs)
 };
+
+export type TagStat = { tag: string; channels: number; videos: number; medianViews: number };
 
 export type TopicTag = "outlier" | "repeated" | "momentum" | "gap";
 
@@ -55,17 +62,31 @@ export type TopicReport = {
   outliers: VideoSignal[];
   momentum: VideoSignal[];
   topics: TopicIdea[];
+  topTags: TagStat[]; // creator tags used by 2+ channels, most channels first
 };
 
 // ---------- Helpers ----------
-function toSignal(video: VideoInfo, channel: ChannelInfo | null, now: Date): VideoSignal {
+function toSignal(video: VideoInfo, channel: ChannelInfo | null, baseline: ChannelBaseline | undefined, now: Date): VideoSignal {
   const ageDays = Math.max(1, (now.getTime() - new Date(video.publishedAt).getTime()) / DAY_MS);
-  const channelAvgViews =
-    channel && channel.videoCount > 0 ? channel.totalViews / channel.videoCount : null;
-  const isGiant = channel?.subscribers !== null && (channel?.subscribers ?? 0) >= GIANT_CHANNEL_SUBS;
-  const outlierRatio =
-    channelAvgViews && channelAvgViews > 0 && !isGiant ? video.views / channelAvgViews : null;
-  return { video, channel, ageDays, viewsPerDay: video.views / ageDays, channelAvgViews, outlierRatio };
+  const isShort = video.durationSeconds > 0 && video.durationSeconds <= 180;
+  const recent = baseline ? (isShort ? baseline.medianShortViews : baseline.medianLongViews) : null;
+  const lifetime = channel && channel.videoCount > 0 ? channel.totalViews / channel.videoCount : null;
+
+  let channelAvgViews: number | null = null;
+  let baselineSource: VideoSignal["baselineSource"] = null;
+  let baselineSample = 0;
+  if (recent !== null && recent > 0) {
+    channelAvgViews = recent;
+    baselineSource = "recent uploads";
+    baselineSample = baseline ? (isShort ? baseline.shortsUsed : baseline.longVideosUsed) : 0;
+  } else if (lifetime !== null && lifetime > 0) {
+    channelAvgViews = lifetime;
+    baselineSource = "lifetime average";
+  }
+
+  const isGiant = (channel?.subscribers ?? 0) >= GIANT_CHANNEL_SUBS;
+  const outlierRatio = channelAvgViews && !isGiant ? video.views / channelAvgViews : null;
+  return { video, channel, ageDays, viewsPerDay: video.views / ageDays, channelAvgViews, baselineSource, baselineSample, outlierRatio };
 }
 
 // Phrases of 1 to 3 words from a title, without the niche's own words
@@ -86,7 +107,7 @@ function phrasesOf(title: string, nicheWords: Set<string>): string[] {
 // ---------- Main ----------
 export function findTopics(result: NicheResult, now = new Date()): TopicReport {
   const channelById = new Map<string, ChannelInfo>(result.channels.map((c) => [c.id, c]));
-  const signals = result.videos.map((v) => toSignal(v, channelById.get(v.channelId) ?? null, now));
+  const signals = result.videos.map((v) => toSignal(v, channelById.get(v.channelId) ?? null, result.baselines?.[v.channelId], now));
 
   const nicheMedianViews = median(signals.map((s) => s.video.views)) ?? 0;
   const nicheMedianViewsPerDay = median(signals.map((s) => s.viewsPerDay)) ?? 0;
@@ -157,5 +178,25 @@ export function findTopics(result: NicheResult, now = new Date()): TopicReport {
       b.tags.length - a.tags.length || b.channelCount - a.channelCount || b.medianViews - a.medianViews,
   );
 
-  return { videosUsed: signals.length, all: signals, nicheMedianViews, nicheMedianViewsPerDay, outliers, momentum, topics };
+  // 4. Creator tags that 2+ different channels used (exactly as creators typed them, lowercased)
+  const byTag = new Map<string, VideoSignal[]>();
+  for (const s of signals) {
+    for (const tag of new Set((s.video.tags ?? []).map((t) => t.trim().toLowerCase()).filter(Boolean))) {
+      const list = byTag.get(tag) ?? [];
+      list.push(s);
+      byTag.set(tag, list);
+    }
+  }
+  const topTags: TagStat[] = [...byTag]
+    .map(([tag, list]) => ({
+      tag,
+      channels: new Set(list.map((s) => s.video.channelId)).size,
+      videos: list.length,
+      medianViews: Math.round(median(list.map((s) => s.video.views)) ?? 0),
+    }))
+    .filter((t) => t.channels >= MIN_TOPIC_CHANNELS)
+    .sort((a, b) => b.channels - a.channels || b.medianViews - a.medianViews)
+    .slice(0, 20);
+
+  return { videosUsed: signals.length, all: signals, nicheMedianViews, nicheMedianViewsPerDay, outliers, momentum, topics, topTags };
 }

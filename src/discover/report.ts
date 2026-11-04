@@ -1,4 +1,4 @@
-import { analysisFor } from "../analysis.js";
+import { COMMENT_VIDEOS, analysisFor, commentsFor } from "../analysis.js";
 import { collectNiche } from "../niche/collectNiche.js";
 import { DAILY_AUTO_CAP, DAILY_LIMIT, addUnits, autoBudgetLeft, unitsUsedToday } from "../quota.js";
 import { checkNodes, collectOptionsFor, type NodeRow } from "./discover.js";
@@ -128,7 +128,15 @@ export async function buildReport() {
 
   // Full video ideas for the #1 pick (saved data: free)
   const top = picks[0] ?? null;
-  const ideas = top ? { forId: top.focus.id, ...(await ideasFor(top.focus)) } : null;
+  let ideas = null;
+  if (top) {
+    const analysis = await ideasFor(top.focus);
+    // Comments on the #1 pick's best outliers: about 5 units, only if today's automatic budget allows
+    const canSpend = (await autoBudgetLeft()) >= COMMENT_VIDEOS;
+    const { comments, unitsUsed } = await commentsFor(analysis.outliers.map((v) => v.id), !canSpend);
+    await addUnits(unitsUsed);
+    ideas = { forId: top.focus.id, ...analysis, viewerComments: comments };
+  }
 
   return {
     builtAt: new Date().toISOString(),
