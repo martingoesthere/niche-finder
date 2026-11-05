@@ -34,6 +34,7 @@ const TITLE_STOP_WORDS = new Set([
   "beginner", "beginners", "guide", "step", "here", "what", "happened", "happens", "happen", "work", "works",
   "actually", "nobody", "people", "man", "men", "woman", "women", "world", "most", "dark", "shocking",
   "would", "could", "should", "might", "must", "seriou", "serious", "honestly", "literally",
+  "but", "everything", "nothing", "something", "anything", "enjoy", "lot", "lots", "still", "much", "very",
 ]);
 
 // ---------- Shapes ----------
