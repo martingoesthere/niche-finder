@@ -4,7 +4,7 @@ import { YouTubeApiError } from "./youtube/youtubeApi.js";
 import { checkNodes, collectOptionsFor, maxUnitsFor, readRows } from "./discover/discover.js";
 import { NICHE_TREE, findNode } from "./discover/nicheTree.js";
 import { CHARACTERISTICS } from "./discover/characteristics.js";
-import { addUnits } from "./quota.js";
+import { DAILY_AUTO_CAP, DAILY_LIMIT, addUnits, unitsUsedToday } from "./quota.js";
 import { analysisFor, commentsFor } from "./analysis.js";
 import { buildReport } from "./discover/report.js";
 
@@ -139,6 +139,12 @@ app.get("/api/raw", async (req: Request, res: Response) => {
   } catch (err: unknown) {
     res.status(404).json({ error: err instanceof Error ? err.message : "No saved data for this topic yet." });
   }
+});
+
+// Today's YouTube units used by this app (free: reads a small saved file)
+app.get("/api/quota", async (_req: Request, res: Response) => {
+  const used = await unitsUsedToday();
+  res.json({ used, limit: DAILY_LIMIT, left: Math.max(0, DAILY_LIMIT - used), autoCap: DAILY_AUTO_CAP });
 });
 
 app.get("/api/characteristics", (_req: Request, res: Response) => {

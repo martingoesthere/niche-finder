@@ -51,6 +51,11 @@
     .floatbtn { position: fixed; right: 20px; bottom: 20px; z-index: 5; box-shadow: 0 4px 14px rgba(15, 123, 108, .35); padding: 12px 18px; }
     .floatbtn.hidden { display: none; }
     .endbar { text-align: center; margin: 22px 0 8px; }
+    .quota { margin: 6px 0 8px; max-width: 520px; }
+    .quota .qtop { display: flex; justify-content: space-between; gap: 10px; font-size: 15px; }
+    .quota .qnum { font-weight: 700; font-variant-numeric: tabular-nums; }
+    .quota .track { height: 12px; }
+    .quota .track::before, .quota .track::after { display: none; }
     .welcome { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 20px 22px; margin: 22px 0 8px; }
     .welcome p { max-width: 64ch; margin-top: 6px; }
     .welcome .btn.big { font-size: 19px; padding: 14px 26px; margin: 14px 0 8px; }
@@ -157,6 +162,7 @@
     <h2>Welcome, Martin 👋</h2>
     <p>Click the button and the app checks YouTube for you: it ranks 10 niches, goes deeper into the best ones, and finds video ideas with real proof. You don't need to type anything.</p>
     <button class="btn big" id="findBtn" type="button">Find my best niches</button>
+    <div class="quota" id="quota" aria-live="polite"></div>
     <p class="small muted" id="findNote">The first time takes 2 to 3 minutes. Niches already checked stay saved for 7 days, so clicking again is free and continues where it stopped (up to 7,000 YouTube units a day).</p>
   </section>
 
@@ -509,6 +515,7 @@
     button.textContent = "Checking YouTube… this can take a minute or two";
     try {
       const data = await getJSON(`/api/tree/check${parentId ? "?parent=" + encodeURIComponent(parentId) : ""}`);
+      refreshQuota();
       await showList(data.error ? `Stopped early: ${data.error}` : `Checked. About ${num(data.unitsUsed)} YouTube units used.`);
     } catch (err) {
       button.disabled = false;
@@ -700,6 +707,7 @@
         ? `/api/analyze?node=${encodeURIComponent(target.id)}`
         : `/api/analyze?q=${encodeURIComponent(target.q)}&lang=${target.lang}&format=${target.format}`;
       const d = await getJSON(url);
+      refreshQuota();
 
       const back = el("button", { type: "button", class: "btn quiet", textContent: "Back to the list" });
       back.addEventListener("click", () => { ideasFor = null; showList(); });
@@ -798,6 +806,7 @@
     try {
       await runReport();
     } finally {
+      refreshQuota();
       reportRunning = false;
       btn.disabled = false;
       btn.textContent = "Find my best niches again";
@@ -811,6 +820,27 @@
     b.addEventListener("click", showReport);
     return el("div", { class: "endbar" }, b,
       el("p", { class: "small muted", textContent: "Saved niches are free for 7 days. A new click continues with anything not checked yet." }));
+  }
+
+  // ---------- Today's YouTube units (always on screen) ----------
+  async function refreshQuota() {
+    const box = document.getElementById("quota");
+    try {
+      const q = await getJSON("/api/quota");
+      const share = Math.min(100, Math.round((q.used / q.limit) * 100));
+      const cls = q.used >= q.autoCap ? "bg-low" : q.used >= q.autoCap * 0.6 ? "bg-mid" : "bg-high";
+      box.replaceChildren(
+        el("div", { class: "qtop" },
+          el("span", {}, "YouTube units used today: ", el("span", { class: "qnum", textContent: `${num(q.used)} of ${num(q.limit)}` })),
+          el("span", { class: "qnum muted", textContent: `${num(q.left)} left` })),
+        el("div", { class: "track", role: "img", ariaLabel: `${num(q.used)} of ${num(q.limit)} units used` }, el("i", { class: cls, style: `width:${share}%` })),
+        el("div", { class: "tiny muted", style: "margin-top:4px", textContent:
+          q.used >= q.autoCap
+            ? `Automatic checks are done for today (they stop at ${num(q.autoCap)}). Clicking again is free and shows your saved results. Resets at midnight Pacific time (2 AM Central).`
+            : `Automatic checks stop at ${num(q.autoCap)}, leaving the rest for your own searches. Resets at midnight Pacific time (2 AM Central).` }));
+    } catch {
+      box.replaceChildren(el("div", { class: "tiny muted", textContent: "Couldn't read today's units. Is the app running?" }));
+    }
   }
 
   async function runReport() {
@@ -962,6 +992,7 @@
   });
 
   document.getElementById("findBtn").addEventListener("click", showReport);
+  refreshQuota();
   document.getElementById("floatBtn").addEventListener("click", showReport);
   view.replaceChildren(el("p", { class: "muted", textContent: "Click “Find my best niches” to start." }));
 </script>
