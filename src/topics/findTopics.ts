@@ -33,6 +33,7 @@ const TITLE_STOP_WORDS = new Set([
   "ways", "why", "true", "facts", "fact", "story", "stories", "simple", "easy", "hard", "complete", "ultimate",
   "beginner", "beginners", "guide", "step", "here", "what", "happened", "happens", "happen", "work", "works",
   "actually", "nobody", "people", "man", "men", "woman", "women", "world", "most", "dark", "shocking",
+  "would", "could", "should", "might", "must", "seriou", "serious", "honestly", "literally",
 ]);
 
 // ---------- Shapes ----------

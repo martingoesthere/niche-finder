@@ -87,7 +87,8 @@ function normalize(text: string): string {
 // Simple plural handling: cards -> card, universities -> university
 function stem(word: string): string {
   if (word.length > 4 && word.endsWith("ies")) return word.slice(0, -3) + "y";
-  if (word.length > 3 && word.endsWith("s") && !word.endsWith("ss"))
+  // Words like "serious", "famous", "virus", "crisis" end in "s" but aren't plurals
+  if (word.length > 3 && word.endsWith("s") && !/(ss|us|is|ous)$/.test(word))
     return word.slice(0, -1);
   return word;
 }
