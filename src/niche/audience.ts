@@ -13,6 +13,38 @@ const MAX_NON_LATIN_SHARE = 0.3;
 // Language codes that don't tell us a real language
 const NOT_A_LANGUAGE = new Set(["zxx", "und", "mul"]);
 
+// ---------- The backpack check: a channel's latest uploads ----------
+// A channel's "country" is whatever its creator typed. Its latest uploads' language labels are a
+// second, independent clue. If most labeled uploads are for another language or country
+// (for example "hi" or "en-IN" when we want US/UK/CA/AU English), the channel is removed.
+export const MIN_LABELED_UPLOADS = 10; // fewer labels than this = not enough evidence, keep the channel
+export const MAX_OFF_TARGET_SHARE = 0.5; // more than half off-target = remove
+
+export function offTargetUploads(
+  uploadLanguages: Record<string, number> | undefined,
+  allowedCountries: string[],
+  language: "en" | "es",
+): string | null {
+  if (!uploadLanguages) return null;
+  let labeled = 0;
+  let off = 0;
+  const offCodes: Record<string, number> = {};
+  for (const [code, count] of Object.entries(uploadLanguages)) {
+    const [base, region] = code.toLowerCase().split("-");
+    if (NOT_A_LANGUAGE.has(base)) continue;
+    labeled += count;
+    const wrongLanguage = base !== language;
+    const wrongRegion = region !== undefined && /^[a-z]{2}$/.test(region) && !allowedCountries.includes(region.toUpperCase());
+    if (wrongLanguage || wrongRegion) {
+      off += count;
+      offCodes[code] = (offCodes[code] ?? 0) + count;
+    }
+  }
+  if (labeled < MIN_LABELED_UPLOADS || off / labeled <= MAX_OFF_TARGET_SHARE) return null;
+  const list = Object.entries(offCodes).sort((a, b) => b[1] - a[1]).map(([c, n]) => `${n} "${c}"`).join(", ");
+  return `${off} of its ${labeled} latest labeled uploads are for another language or country (${list})`;
+}
+
 export type AudienceResult = {
   kept: VideoInfo[];
   removed: RemovedVideo[];

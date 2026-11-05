@@ -1,6 +1,6 @@
 import { cached, hasCache } from "../cache/fileCache.js";
 import { filterRelevant, type RemovedVideo } from "./relevance.js";
-import { filterAudience, TARGET_COUNTRIES } from "./audience.js";
+import { filterAudience, offTargetUploads, TARGET_COUNTRIES } from "./audience.js";
 import { filterContentType, type VideoFormat } from "./contentType.js";
 import {
   getChannels,
@@ -10,7 +10,6 @@ import {
   type VideoInfo,
 } from "../youtube/youtubeApi.js";
 import { getBaselines, type ChannelBaseline } from "../youtube/enrich.js";
-import { GIANT_CHANNEL_SUBS } from "./scoreNiche.js";
 
 // Your reliability rule: score only with at least this many kept videos
 export const MIN_VIDEOS = 30;
@@ -311,11 +310,32 @@ export async function collectNiche(
   const keptChannelIds = new Set(videos.map((v) => v.channelId));
 
   // 4. Each kept channel's normal views, from its latest uploads (2 units per channel, saved 7 days)
-  // Channels with 1M+ subscribers never count as outliers, so their normal views aren't needed
-  const needBaseline = raw.data.channels
-    .filter((c) => keptChannelIds.has(c.id) && (c.subscribers ?? 0) < GIANT_CHANNEL_SUBS)
-    .map((c) => c.id);
-  const { baselines, unitsUsed: baselineUnits } = await getBaselines(needBaseline, options.cacheOnly ?? false);
+  // (giants too: their latest uploads are also how we catch wrong-country channels below)
+  const { baselines, unitsUsed: baselineUnits } = await getBaselines([...keptChannelIds], options.cacheOnly ?? false);
+
+  // 5. The backpack check: remove channels whose latest uploads are mostly for another language or country
+  const backpackRemoved: RemovedVideo[] = [];
+  const offTarget = new Map<string, string>();
+  for (const id of keptChannelIds) {
+    const reason = offTargetUploads(baselines[id]?.uploadLanguages, targetCountries, language);
+    if (reason) offTarget.set(id, reason);
+  }
+  const passBackpack = (list: VideoInfo[]) =>
+    list.filter((v) => {
+      const reason = offTarget.get(v.channelId);
+      if (reason) backpackRemoved.push({ video: v, filter: "country", reason });
+      return !reason;
+    });
+  const finalExact = passBackpack(exactType.kept);
+  const finalBroad = passBackpack(broadType.kept);
+  const finalVideos = [...finalExact, ...finalBroad];
+  const finalChannelIds = new Set(finalVideos.map((v) => v.channelId));
+  if (typical) {
+    // Ordinary uploads: same check, for channels we already looked up
+    typical.videos = typical.videos.filter((v) => !offTarget.has(v.channelId));
+    const typicalIds = new Set(typical.videos.map((v) => v.channelId));
+    typical.channels = typical.channels.filter((c) => typicalIds.has(c.id));
+  }
 
   return {
     query: cleanQuery,
@@ -331,18 +351,19 @@ export async function collectNiche(
     stoppedBecause: raw.data.stoppedBecause,
     keywords: relevance.keywords,
     totalFound: raw.data.videos.length,
-    exactVideos: exactType.kept,
-    broadVideos: broadType.kept,
-    videos,
+    exactVideos: finalExact,
+    broadVideos: finalBroad,
+    videos: finalVideos,
     removed: [
       ...relevance.removed,
       ...exact.removed,
       ...broad.removed,
       ...exactType.removed,
       ...broadType.removed,
+      ...backpackRemoved,
     ],
     unknownCountryVideos: exact.unknownCountry + broad.unknownCountry,
-    channels: raw.data.channels.filter((c) => keptChannelIds.has(c.id)),
+    channels: raw.data.channels.filter((c) => finalChannelIds.has(c.id)),
     baselines,
     typical,
   };

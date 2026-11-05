@@ -22,6 +22,9 @@ export type ChannelBaseline = {
   medianLongViews: number | null; // null = fewer than 5 usable long videos
   shortsUsed: number;
   medianShortViews: number | null;
+  // Language labels on the latest uploads, exactly as YouTube returns them ("en-US": 30, "hi": 12...).
+  // Uploads with no label aren't counted.
+  uploadLanguages: Record<string, number>;
   checkedAt: string;
 };
 
@@ -32,7 +35,7 @@ function median(values: number[]): number | null {
   return sorted.length % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
-const baselineKey = (channelId: string) => `baseline:v1:${channelId}`;
+const baselineKey = (channelId: string) => `baseline:v2:${channelId}`;
 
 // Costs 2 units per channel (uploads list + their stats), 0 if saved in the last 7 days.
 // cacheOnly = never call YouTube (returns null when nothing is saved).
@@ -62,6 +65,11 @@ export async function getChannelBaseline(
       medianLongViews: long.length >= BASELINE_MIN_VIDEOS ? median(long.map((v) => v.views)) : null,
       shortsUsed: shorts.length,
       medianShortViews: shorts.length >= BASELINE_MIN_VIDEOS ? median(shorts.map((v) => v.views)) : null,
+      uploadLanguages: videos.reduce<Record<string, number>>((acc, v) => {
+        const code = (v.audioLanguage ?? v.textLanguage)?.trim();
+        if (code) acc[code] = (acc[code] ?? 0) + 1;
+        return acc;
+      }, {}),
       checkedAt: new Date().toISOString(),
     };
   });
