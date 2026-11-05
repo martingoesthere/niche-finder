@@ -2,7 +2,8 @@ import { COMMENT_VIDEOS, analysisFor, commentsFor } from "../analysis.js";
 import { collectNiche } from "../niche/collectNiche.js";
 import { DAILY_AUTO_CAP, DAILY_LIMIT, addUnits, autoBudgetLeft, unitsUsedToday } from "../quota.js";
 import { checkNodes, collectOptionsFor, type NodeRow } from "./discover.js";
-import { NICHE_TREE, findNode, type TreeNode } from "./nicheTree.js";
+import { NICHE_TREE, findNode, getSuggestedNodes, type TreeNode } from "./nicheTree.js";
+import { suggestionId, updateSuggestions } from "./suggest.js";
 
 // Automatic report (no input at all): your top 10 choices.
 // Checks the 10 niches, then goes deeper into each one, best first: its sub-niches,
@@ -24,6 +25,14 @@ async function checkWithinBudget(nodes: TreeNode[]): Promise<Checked> {
   await addUnits(report.unitsUsed);
   return { rows: report.rows, skipped: report.skipped.length, error: report.error };
 }
+
+// A topic the data suggested, with where its clue was found
+export type SuggestionRow = NodeRow & {
+  foundIn: string; // the checked topic where the clue was found
+  source: "tags" | "titles";
+  clueChannels: number; // different channels that used the phrase
+  clueMedianViews: number; // median views of those videos
+};
 
 export type PickIdea = {
   phrase: string;
@@ -56,13 +65,27 @@ async function ideasFor(row: NodeRow) {
 
 export async function buildReport() {
   const notes: string[] = [];
-  let waiting = { niches: 0, subs: 0, micros: 0 };
+  let waiting = { niches: 0, suggestions: 0, subs: 0, micros: 0 };
   let error: string | null = null;
 
   // 1. The 10 niches
   const niches = await checkWithinBudget(NICHE_TREE);
   waiting.niches = niches.skipped;
   error ??= niches.error;
+
+  // 1b. Topics suggested by real data: phrases 2+ channels used in the checked niches' tags
+  //     and titles (finding them is free). Up to 3 new ones a day, each checked with the full test.
+  const suggestionList = await updateSuggestions(niches.rows);
+  const suggested = await checkWithinBudget(getSuggestedNodes());
+  waiting.suggestions = suggested.skipped;
+  error ??= suggested.error;
+  const suggestions: SuggestionRow[] = suggestionList
+    .map((s) => {
+      const row = suggested.rows.find((r) => r.id === suggestionId(s.query));
+      return row ? { ...row, foundIn: s.parentQuery, source: s.source, clueChannels: s.channels, clueMedianViews: s.medianViews } : null;
+    })
+    .filter((r): r is SuggestionRow => r !== null)
+    .sort((a, b) => (b.fit ?? -1) - (a.fit ?? -1) || Number(b.checked) - Number(a.checked));
 
   // 2. Go deeper, best niche first: its sub-niches, then the best sub-niche's micro-niches.
   //    When today's automatic limit is reached, the rest are read from saved data only.
@@ -119,6 +142,7 @@ export async function buildReport() {
   if (error) notes.push(`Stopped early: ${error}`);
   const waitingParts = [
     waiting.niches ? `${waiting.niches} niches` : "",
+    waiting.suggestions ? `${waiting.suggestions} suggested topics` : "",
     waiting.subs ? `${waiting.subs} sub-niches` : "",
     waiting.micros ? `${waiting.micros} micro-niches` : "",
   ].filter(Boolean);
@@ -146,6 +170,7 @@ export async function buildReport() {
     notes,
     picks,
     niches: niches.rows,
+    suggestions,
     ideas,
   };
 }

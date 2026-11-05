@@ -470,7 +470,7 @@
       el("div", {},
         el("h3", { class: "name", textContent: r.query }),
         el("div", { class: "muted small", textContent: r.group }),
-        r.checked && r.metrics ? el("p", { class: "summary", textContent: summarySentence(r) }) : el("p", { class: "summary muted", textContent: "No YouTube data yet. Use the check button above." }),
+        r.checked && r.metrics ? el("p", { class: "summary", textContent: summarySentence(r) }) : el("p", { class: "summary muted", textContent: r.emptyNote ?? "No YouTube data yet. Use the check button above." }),
         r.topTopics.length ? el("div", {}, el("span", { class: "small muted", textContent: "Popular topics: " }), ...r.topTopics.map((t) => el("span", { class: "chip", textContent: t }))) : null,
       ),
       el("div", { class: "fitbox" }, el("div", { class: "fitnum" }, dot(dotFor(r.checked ? r.fit : null)), " ", String(fitText)),
@@ -843,6 +843,27 @@
     }
   }
 
+  // ---------- 🔍 Suggested by data ----------
+  // Topics the app found inside the checked niches: phrases 2+ different channels used in their
+  // tags or titles. Each one gets the same full real-data check as every other topic.
+  function suggestionSection(list) {
+    const sec = el("section", { class: "panel" },
+      el("h2", { textContent: "🔍 Suggested by data" }),
+      el("p", { class: "muted small", textContent: "New topics nobody typed in. The app read the tags and titles of the real videos it already checked, and kept phrases that 2 or more different channels used. Then it checked each one with the same full test as every other topic. Up to 3 new suggestions a day." }));
+    if (!list || !list.length) {
+      sec.append(el("p", { class: "muted small", textContent: "No suggestions yet: they appear after the big topics are checked." }));
+      return sec;
+    }
+    list.forEach((r, i) => {
+      const clue = el("p", { class: "small", style: "margin:12px 0 4px" },
+        el("b", { textContent: "Clue: " }),
+        `found in the ${r.source} of ${r.clueChannels} different channels inside “${r.foundIn}” (their median: ${num(r.clueMedianViews)} views).`);
+      const row = nicheRow({ ...r, emptyNote: "Not checked yet. It will be checked automatically on the next run with units left." }, i);
+      sec.append(clue, row);
+    });
+    return sec;
+  }
+
   async function runReport() {
     inReport = true;
     ideasFor = null;
@@ -871,6 +892,7 @@
             el("p", { class: "muted small", textContent: "Ranked by Fit. Each one shows its best sub-niche and micro-niche (once checked), the key numbers, and its top video ideas." }))),
         ...rep.picks.map(pickCard),
         ...(waiting.length ? [el("div", { class: "panel muted", textContent: `Not checked yet: ${waiting.map((n) => n.query).join(", ")}. They'll be added automatically tomorrow.` })] : []),
+        suggestionSection(rep.suggestions),
         ...(rep.ideas ? ideasSections(rep.ideas, { maxIdeas: 10 }).map((sec, i) => {
           if (i === 0) sec.children[0].textContent = `All video ideas for #1: “${top.focus.query}”`;
           return sec;

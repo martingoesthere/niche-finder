@@ -96,11 +96,26 @@ export const NICHE_TREE: TreeNode[] = RAW.map(([query, group, subs]) => ({
   })),
 }));
 
-export function findNode(id: string, nodes: TreeNode[] = NICHE_TREE): TreeNode | null {
+// Topics suggested by real data (see suggest.ts). They live outside the hand-picked tree,
+// but findNode finds them too, so they can be checked and opened like any other topic.
+let suggestedNodes: TreeNode[] = [];
+export function setSuggestedNodes(nodes: TreeNode[]) {
+  suggestedNodes = nodes;
+}
+export function getSuggestedNodes(): TreeNode[] {
+  return suggestedNodes;
+}
+
+function searchNodes(id: string, nodes: TreeNode[]): TreeNode | null {
   for (const n of nodes) {
     if (n.id === id) return n;
-    const inChild = findNode(id, n.children);
+    const inChild = searchNodes(id, n.children);
     if (inChild) return inChild;
   }
   return null;
+}
+
+export function findNode(id: string, nodes?: TreeNode[]): TreeNode | null {
+  if (nodes) return searchNodes(id, nodes);
+  return searchNodes(id, NICHE_TREE) ?? searchNodes(id, suggestedNodes);
 }

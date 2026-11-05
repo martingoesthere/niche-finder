@@ -7,6 +7,7 @@ import { CHARACTERISTICS } from "./discover/characteristics.js";
 import { DAILY_AUTO_CAP, DAILY_LIMIT, addUnits, unitsUsedToday } from "./quota.js";
 import { analysisFor, commentsFor } from "./analysis.js";
 import { buildReport } from "./discover/report.js";
+import { loadSuggestions } from "./discover/suggest.js";
 
 const PORT = Number(process.env.PORT ?? 3000);
 const app = express();
@@ -150,6 +151,9 @@ app.get("/api/quota", async (_req: Request, res: Response) => {
 app.get("/api/characteristics", (_req: Request, res: Response) => {
   res.json(CHARACTERISTICS);
 });
+
+// Topics the data suggested on earlier days, so they can be opened and checked
+await loadSuggestions();
 
 // Only reachable from your own computer
 app.listen(PORT, "127.0.0.1", () => {
